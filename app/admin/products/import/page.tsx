@@ -226,7 +226,7 @@ export default function ImportProductsPage() {
 
             <div className="flex flex-wrap gap-3">
               <a
-                href="/templates/white-c-google-sheet-product-import-template-ai-fields.xlsx"
+                href="/templates/white-c-google-sheet-product-import-fields-template.xlsx"
                 download
                 className="rounded-xl border px-5 py-3 font-semibold hover:bg-muted"
               >
