@@ -14,10 +14,17 @@ type CsvRow = {
   budget_band?: string
   occasion?: string
   recipient_type?: string
+  use_case?: string
+  industry?: string
   material?: string
+  brandable_area?: string
+  packaging?: string
+  logistics_type?: string
+  delivery_window?: string
   moq?: string
-  branding_available?: string
   lead_time?: string
+  color_options?: string
+  tags?: string
   description?: string
   image_url?: string
   is_active?: string
@@ -32,10 +39,17 @@ type ProductImportRow = {
   budget_band: string
   occasion: string | null
   recipient_type: string | null
+  use_case: string | null
+  industry: string | null
   material: string | null
+  brandable_area: string | null
+  packaging: string | null
+  logistics_type: string | null
+  delivery_window: string | null
   moq: string | null
-  branding_available: string | null
   lead_time: string | null
+  color_options: string | null
+  tags: string | null
   description: string | null
   image_url: string | null
   is_active: boolean
@@ -112,10 +126,17 @@ export default function ImportProductsPage() {
             budget_band: String(row.budget_band || "").trim(),
             occasion: cleanText(row.occasion),
             recipient_type: cleanText(row.recipient_type),
+            use_case: cleanText(row.use_case),
+            industry: cleanText(row.industry),
             material: cleanText(row.material),
+            brandable_area: cleanText(row.brandable_area),
+            packaging: cleanText(row.packaging),
+            logistics_type: cleanText(row.logistics_type),
+            delivery_window: cleanText(row.delivery_window),
             moq: cleanText(row.moq),
-            branding_available: cleanText(row.branding_available),
             lead_time: cleanText(row.lead_time),
+            color_options: cleanText(row.color_options),
+            tags: cleanText(row.tags),
             description: cleanText(row.description),
             image_url: cleanText(row.image_url),
             is_active: convertToBoolean(row.is_active, true),
@@ -162,81 +183,12 @@ export default function ImportProductsPage() {
     setRows([])
   }
 
-  function downloadTemplate() {
-    const headers = [
-      "brand",
-      "name",
-      "category",
-      "budget_band",
-      "occasion",
-      "recipient_type",
-      "material",
-      "moq",
-      "branding_available",
-      "lead_time",
-      "description",
-      "image_url",
-      "is_active",
-      "is_featured",
-    ]
-
-    const sampleRows = [
-      [
-        "Milton",
-        "Steel Bottle",
-        "Drinkware",
-        "₹250–₹500",
-        "Onboarding",
-        "Employees",
-        "Steel",
-        "100 units",
-        "Logo printing available",
-        "7 days",
-        "Premium bottle for employee gifting",
-        "",
-        "true",
-        "false",
-      ],
-      [
-        "Generic",
-        "Premium Diary Set",
-        "Stationery",
-        "₹250–₹500",
-        "Client gifting",
-        "Clients",
-        "Paper and metal",
-        "100 units",
-        "Logo embossing available",
-        "15 days",
-        "Premium diary and pen set for corporate gifting",
-        "",
-        "true",
-        "false",
-      ],
-    ]
-
-    const csv = Papa.unparse({
-      fields: headers,
-      data: sampleRows,
-    })
-
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
-    const url = URL.createObjectURL(blob)
-
-    const link = document.createElement("a")
-    link.href = url
-    link.download = "white-c-product-import-template.csv"
-    link.click()
-
-    URL.revokeObjectURL(url)
-  }
-
   return (
     <div className="flex min-h-screen flex-col">
       <Navbar />
 
       <main className="flex-1 px-6 py-16">
-        <div className="mx-auto max-w-6xl">
+        <div className="mx-auto max-w-7xl">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -251,13 +203,13 @@ export default function ImportProductsPage() {
             </div>
 
             <div className="flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={downloadTemplate}
+              <a
+                href="/templates/white-c-google-sheet-product-import-template-ai-fields.xlsx"
+                download
                 className="rounded-xl border px-5 py-3 font-semibold hover:bg-muted"
               >
                 Download Template
-              </button>
+              </a>
 
               <Link
                 href="/admin/products"
@@ -272,23 +224,29 @@ export default function ImportProductsPage() {
             <h2 className="text-2xl font-semibold">CSV format</h2>
 
             <p className="mt-3 text-muted-foreground">
-              Your Google Sheet must have these column names in the first row:
+              Download the Excel template, open it in Google Sheets, fill products, then export as CSV and upload here.
             </p>
 
             <div className="mt-5 overflow-x-auto rounded-2xl bg-muted p-4 text-sm">
               <code>
                 brand, name, category, budget_band, occasion, recipient_type,
-                material, moq, branding_available, lead_time, description,
-                image_url, is_active, is_featured
+                use_case, industry, material, brandable_area, packaging,
+                logistics_type, delivery_window, moq, lead_time, color_options,
+                tags, description, image_url, is_active, is_featured
               </code>
             </div>
 
             <div className="mt-5 rounded-2xl border bg-muted/40 p-5 text-sm text-muted-foreground">
               <p className="font-medium text-foreground">How import works:</p>
+
               <p className="mt-2">
                 SKU is generated automatically using name, category, budget band,
-                material, and brand. If the generated SKU already exists, the
+                material, and brand. If the generated SKU already exists, that
                 product will be updated. If it is new, a new product will be created.
+              </p>
+
+              <p className="mt-2">
+                Required fields: name, category, budget_band, and material.
               </p>
             </div>
 
@@ -334,7 +292,7 @@ export default function ImportProductsPage() {
 
           {rows.length > 0 && (
             <div className="mt-10 overflow-x-auto rounded-3xl border">
-              <table className="w-full min-w-[1200px] border-collapse text-left">
+              <table className="w-full min-w-[1500px] border-collapse text-left">
                 <thead className="bg-muted">
                   <tr>
                     <th className="p-4">Auto SKU</th>
@@ -342,8 +300,14 @@ export default function ImportProductsPage() {
                     <th className="p-4">Name</th>
                     <th className="p-4">Category</th>
                     <th className="p-4">Budget</th>
+                    <th className="p-4">Occasion</th>
+                    <th className="p-4">Recipient</th>
+                    <th className="p-4">Use Case</th>
+                    <th className="p-4">Industry</th>
+                    <th className="p-4">Material</th>
                     <th className="p-4">MOQ</th>
                     <th className="p-4">Lead Time</th>
+                    <th className="p-4">Tags</th>
                     <th className="p-4">Active</th>
                     <th className="p-4">Featured</th>
                   </tr>
@@ -359,8 +323,16 @@ export default function ImportProductsPage() {
                       <td className="p-4 font-medium">{row.name}</td>
                       <td className="p-4 text-muted-foreground">{row.category}</td>
                       <td className="p-4 text-muted-foreground">{row.budget_band}</td>
+                      <td className="p-4 text-muted-foreground">{row.occasion || "-"}</td>
+                      <td className="p-4 text-muted-foreground">{row.recipient_type || "-"}</td>
+                      <td className="p-4 text-muted-foreground">{row.use_case || "-"}</td>
+                      <td className="p-4 text-muted-foreground">{row.industry || "-"}</td>
+                      <td className="p-4 text-muted-foreground">{row.material || "-"}</td>
                       <td className="p-4 text-muted-foreground">{row.moq || "-"}</td>
                       <td className="p-4 text-muted-foreground">{row.lead_time || "-"}</td>
+                      <td className="max-w-[180px] truncate p-4 text-muted-foreground">
+                        {row.tags || "-"}
+                      </td>
                       <td className="p-4">{row.is_active ? "Yes" : "No"}</td>
                       <td className="p-4">{row.is_featured ? "Yes" : "No"}</td>
                     </tr>
