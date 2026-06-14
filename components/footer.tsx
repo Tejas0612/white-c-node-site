@@ -27,6 +27,7 @@ const FOOTER_LINKS = [
       { href: "/about", label: "Why WhiteC" },
       { href: "/inquiry", label: "Contact sales" },
       { href: "/inquiry", label: "Bulk inquiry" },
+      { href: "/admin", label: "Admin" },
     ],
   },
 ]
@@ -40,21 +41,28 @@ export function Footer() {
             <Link href="/">
               <Logo />
             </Link>
+
             <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
-              AI-powered corporate gifting for every budget, team, and occasion. Inquiry-first
-              curation, branding, and bulk quotation support across India.
+              AI-powered corporate gifting for every budget, team, and occasion.
+              Inquiry-first curation, branding, and bulk quotation support across India.
             </p>
+
             <ul className="mt-5 flex flex-col gap-3 text-sm text-muted-foreground">
               <li className="flex items-start gap-2.5">
                 <MapPin className="mt-0.5 size-4 shrink-0 text-warm" />
                 <span>CK-125, Sector 2, Salt Lake City, Kolkata – 700091</span>
               </li>
+
               <li className="flex items-center gap-2.5">
                 <Phone className="size-4 shrink-0 text-warm" />
-                <a href="tel:+919830113007" className="transition-colors hover:text-foreground">
+                <a
+                  href="tel:+919830113007"
+                  className="transition-colors hover:text-foreground"
+                >
                   +91-9830113007
                 </a>
               </li>
+
               <li className="flex items-center gap-2.5">
                 <Clock className="size-4 shrink-0 text-warm" />
                 <span>Mon–Fri, 9:00 AM – 5:00 PM</span>
@@ -64,7 +72,10 @@ export function Footer() {
 
           {FOOTER_LINKS.map((col) => (
             <div key={col.heading}>
-              <h3 className="text-sm font-semibold text-foreground">{col.heading}</h3>
+              <h3 className="text-sm font-semibold text-foreground">
+                {col.heading}
+              </h3>
+
               <ul className="mt-4 flex flex-col gap-3">
                 {col.links.map((link) => (
                   <li key={link.label}>
@@ -85,6 +96,7 @@ export function Footer() {
           <p className="text-sm text-muted-foreground">
             © {new Date().getFullYear()} WhiteC. Corporate gifting, made smarter.
           </p>
+
           <p className="text-sm text-muted-foreground">
             Inquiry-based platform — no online payments required.
           </p>
