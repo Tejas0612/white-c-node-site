@@ -2,11 +2,61 @@
 
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
-import { Button } from "@/components/ui/button"
 import { useState } from "react"
 
 export default function InquiryPage() {
   const [submitted, setSubmitted] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    const form = event.currentTarget
+    const formData = new FormData(form)
+
+    setLoading(true)
+    setError("")
+    setSubmitted(false)
+
+    const payload = {
+      companyName: formData.get("companyName"),
+      contactPerson: formData.get("contactPerson"),
+      email: formData.get("email"),
+      phone: formData.get("phone"),
+      budgetBand: formData.get("budgetBand"),
+      quantity: formData.get("quantity"),
+      occasion: formData.get("occasion"),
+      deliveryCity: formData.get("deliveryCity"),
+      brandingRequired: formData.get("brandingRequired"),
+      timeline: formData.get("timeline"),
+      message: formData.get("message"),
+    }
+
+    try {
+      const response = await fetch("/api/inquiry", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      })
+
+      const result = await response.json()
+
+      if (!result.success) {
+        setError(result.message || "Inquiry could not be sent. Please try again.")
+        return
+      }
+
+      setSubmitted(true)
+      form.reset()
+    } catch {
+      setError("Something went wrong. Please try again.")
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -19,32 +69,53 @@ export default function InquiryPage() {
               <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                 Request Quote
               </p>
+
               <h1 className="text-4xl font-bold tracking-tight md:text-6xl">
                 Tell us your gifting requirement.
               </h1>
+
               <p className="mt-5 max-w-2xl text-lg text-muted-foreground">
                 Share your budget band, quantity, occasion, and branding needs. Our team will help you with curated options and a custom quote.
               </p>
 
-              <form
-                className="mt-10 grid gap-4"
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  setSubmitted(true)
-                }}
-              >
+              <form className="mt-10 grid gap-4" onSubmit={handleSubmit}>
                 <div className="grid gap-4 md:grid-cols-2">
-                  <input className="rounded-xl border bg-background p-4" placeholder="Company name" required />
-                  <input className="rounded-xl border bg-background p-4" placeholder="Contact person" required />
+                  <input
+                    name="companyName"
+                    className="rounded-xl border bg-background p-4"
+                    placeholder="Company name"
+                    required
+                  />
+                  <input
+                    name="contactPerson"
+                    className="rounded-xl border bg-background p-4"
+                    placeholder="Contact person"
+                    required
+                  />
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
-                  <input className="rounded-xl border bg-background p-4" placeholder="Email" type="email" required />
-                  <input className="rounded-xl border bg-background p-4" placeholder="Phone / WhatsApp number" required />
+                  <input
+                    name="email"
+                    className="rounded-xl border bg-background p-4"
+                    placeholder="Email"
+                    type="email"
+                    required
+                  />
+                  <input
+                    name="phone"
+                    className="rounded-xl border bg-background p-4"
+                    placeholder="Phone / WhatsApp number"
+                    required
+                  />
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
-                  <select className="rounded-xl border bg-background p-4" required>
+                  <select
+                    name="budgetBand"
+                    className="rounded-xl border bg-background p-4"
+                    required
+                  >
                     <option value="">Select budget band</option>
                     <option>Under ₹250</option>
                     <option>₹250–₹500</option>
@@ -52,43 +123,71 @@ export default function InquiryPage() {
                     <option>₹1000+</option>
                   </select>
 
-                  <input className="rounded-xl border bg-background p-4" placeholder="Quantity e.g. 500" required />
+                  <input
+                    name="quantity"
+                    className="rounded-xl border bg-background p-4"
+                    placeholder="Quantity e.g. 500"
+                    required
+                  />
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
-                  <input className="rounded-xl border bg-background p-4" placeholder="Occasion e.g. Diwali, onboarding" />
-                  <input className="rounded-xl border bg-background p-4" placeholder="Delivery city" />
+                  <input
+                    name="occasion"
+                    className="rounded-xl border bg-background p-4"
+                    placeholder="Occasion e.g. Diwali, onboarding"
+                  />
+                  <input
+                    name="deliveryCity"
+                    className="rounded-xl border bg-background p-4"
+                    placeholder="Delivery city"
+                  />
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
-                  <select className="rounded-xl border bg-background p-4">
+                  <select
+                    name="brandingRequired"
+                    className="rounded-xl border bg-background p-4"
+                  >
                     <option value="">Branding required?</option>
                     <option>Yes</option>
                     <option>No</option>
                     <option>Not sure</option>
                   </select>
 
-                  <input className="rounded-xl border bg-background p-4" placeholder="Timeline e.g. within 2 weeks" />
+                  <input
+                    name="timeline"
+                    className="rounded-xl border bg-background p-4"
+                    placeholder="Timeline e.g. within 2 weeks"
+                  />
                 </div>
 
                 <textarea
+                  name="message"
                   className="min-h-36 rounded-xl border bg-background p-4"
                   placeholder="Message / requirements"
                 />
 
                 <button
-                type="submit"
-                className="w-fit rounded-xl bg-black px-6 py-4 text-base font-semibold text-white transition hover:bg-black/90"
+                  type="submit"
+                  disabled={loading}
+                  className="w-fit rounded-xl bg-black px-6 py-4 text-base font-semibold text-white transition hover:bg-black/90 disabled:opacity-60"
                 >
-                Submit Inquiry
+                  {loading ? "Sending..." : "Submit Inquiry"}
                 </button>
 
                 {submitted && (
                   <div className="rounded-2xl border bg-secondary p-5">
-                    <p className="font-semibold">Inquiry captured locally ✅</p>
+                    <p className="font-semibold">Inquiry sent successfully ✅</p>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Next step: we will connect this form to email, Google Sheets, WhatsApp, or CRM.
+                      You will receive this inquiry on your email.
                     </p>
+                  </div>
+                )}
+
+                {error && (
+                  <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-700">
+                    {error}
                   </div>
                 )}
               </form>
@@ -99,7 +198,7 @@ export default function InquiryPage() {
 
               <div className="mt-6 space-y-5">
                 {[
-                  "WhiteC reviews your requirement.",
+                  "white-c reviews your requirement.",
                   "Curated product options are shortlisted.",
                   "Logo branding and packaging options are checked.",
                   "Bulk quote is prepared based on quantity and timeline.",
