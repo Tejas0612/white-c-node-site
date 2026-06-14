@@ -2,12 +2,48 @@
 
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
-import { useState } from "react"
+import { useEffect, useState } from "react"
+
+type InquiryProduct = {
+  id: string
+  name: string
+  brand?: string | null
+  category?: string | null
+  budget_band?: string | null
+  image_url?: string | null
+}
 
 export default function InquiryPage() {
   const [submitted, setSubmitted] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [selectedProducts, setSelectedProducts] = useState<InquiryProduct[]>([])
+
+  useEffect(() => {
+    const savedProducts = JSON.parse(
+      localStorage.getItem("whitec_inquiry_products") || "[]"
+    )
+
+    setSelectedProducts(savedProducts)
+  }, [])
+
+  function removeProduct(productId: string) {
+    const updatedProducts = selectedProducts.filter(
+      (product) => product.id !== productId
+    )
+
+    setSelectedProducts(updatedProducts)
+
+    localStorage.setItem(
+      "whitec_inquiry_products",
+      JSON.stringify(updatedProducts)
+    )
+  }
+
+  function clearProducts() {
+    setSelectedProducts([])
+    localStorage.removeItem("whitec_inquiry_products")
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -31,6 +67,7 @@ export default function InquiryPage() {
       brandingRequired: formData.get("brandingRequired"),
       timeline: formData.get("timeline"),
       message: formData.get("message"),
+      selectedProducts,
     }
 
     try {
@@ -51,6 +88,8 @@ export default function InquiryPage() {
 
       setSubmitted(true)
       form.reset()
+      setSelectedProducts([])
+      localStorage.removeItem("whitec_inquiry_products")
     } catch {
       setError("Something went wrong. Please try again.")
     } finally {
@@ -75,8 +114,87 @@ export default function InquiryPage() {
               </h1>
 
               <p className="mt-5 max-w-2xl text-lg text-muted-foreground">
-                Share your budget band, quantity, occasion, and branding needs. Our team will help you with curated options and a custom quote.
+                Share your budget band, quantity, occasion, and branding needs.
+                Our team will help you with curated options and a custom quote.
               </p>
+
+              {selectedProducts.length > 0 ? (
+                <div className="mt-10 rounded-3xl border bg-card p-6">
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                      <h2 className="text-2xl font-semibold">
+                        Selected Products
+                      </h2>
+
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        These products will be included in your inquiry.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={clearProducts}
+                      className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-muted"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+
+                  <div className="mt-5 grid gap-4">
+                    {selectedProducts.map((product) => (
+                      <div
+                        key={product.id}
+                        className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border p-4"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="flex size-16 items-center justify-center overflow-hidden rounded-xl bg-muted">
+                            {product.image_url ? (
+                              <img
+                                src={product.image_url}
+                                alt={product.name}
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              <span className="text-xs text-muted-foreground">
+                                Image
+                              </span>
+                            )}
+                          </div>
+
+                          <div>
+                            <p className="font-semibold">{product.name}</p>
+
+                            <p className="text-sm text-muted-foreground">
+                              {[product.brand, product.category, product.budget_band]
+                                .filter(Boolean)
+                                .join(" • ")}
+                            </p>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => removeProduct(product.id)}
+                          className="rounded-xl border px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-10 rounded-3xl border bg-muted/40 p-6">
+                  <h2 className="text-xl font-semibold">
+                    No products selected yet
+                  </h2>
+
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    You can still submit a general inquiry, or go to the catalog
+                    and add products to inquiry first.
+                  </p>
+                </div>
+              )}
 
               <form className="mt-10 grid gap-4" onSubmit={handleSubmit}>
                 <div className="grid gap-4 md:grid-cols-2">
@@ -86,6 +204,7 @@ export default function InquiryPage() {
                     placeholder="Company name"
                     required
                   />
+
                   <input
                     name="contactPerson"
                     className="rounded-xl border bg-background p-4"
@@ -102,6 +221,7 @@ export default function InquiryPage() {
                     type="email"
                     required
                   />
+
                   <input
                     name="phone"
                     className="rounded-xl border bg-background p-4"
@@ -137,6 +257,7 @@ export default function InquiryPage() {
                     className="rounded-xl border bg-background p-4"
                     placeholder="Occasion e.g. Diwali, onboarding"
                   />
+
                   <input
                     name="deliveryCity"
                     className="rounded-xl border bg-background p-4"
@@ -179,6 +300,7 @@ export default function InquiryPage() {
                 {submitted && (
                   <div className="rounded-2xl border bg-secondary p-5">
                     <p className="font-semibold">Inquiry sent successfully ✅</p>
+
                     <p className="mt-1 text-sm text-muted-foreground">
                       You will receive this inquiry on your email.
                     </p>
@@ -194,7 +316,9 @@ export default function InquiryPage() {
             </div>
 
             <aside className="rounded-3xl border bg-card p-8 shadow-sm">
-              <h2 className="text-2xl font-semibold">What happens after you submit?</h2>
+              <h2 className="text-2xl font-semibold">
+                What happens after you submit?
+              </h2>
 
               <div className="mt-6 space-y-5">
                 {[
@@ -208,6 +332,7 @@ export default function InquiryPage() {
                     <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-semibold">
                       {index + 1}
                     </div>
+
                     <p className="text-muted-foreground">{item}</p>
                   </div>
                 ))}
@@ -215,8 +340,10 @@ export default function InquiryPage() {
 
               <div className="mt-8 rounded-2xl bg-muted p-5">
                 <p className="font-medium">No online payment required.</p>
+
                 <p className="mt-2 text-sm text-muted-foreground">
-                  This is an inquiry-first B2B journey. Pricing is shared privately after requirement review.
+                  This is an inquiry-first B2B journey. Pricing is shared
+                  privately after requirement review.
                 </p>
               </div>
             </aside>

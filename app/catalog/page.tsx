@@ -3,7 +3,8 @@ import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import { supabase } from "@/lib/supabase"
-
+import { AddToInquiryButton } from "@/components/inquiry/add-to-inquiry-button"
+    
 export const dynamic = "force-dynamic"
 
 export default async function CatalogPage() {
@@ -123,9 +124,16 @@ export default async function CatalogPage() {
                       )}
 
                       <div className="flex gap-3 pt-5">
-                        <Link href="/inquiry">
-                          <Button>Add to Inquiry</Button>
-                        </Link>
+                        <AddToInquiryButton
+                        product={{
+                            id: product.id,
+                            name: product.name,
+                            brand: product.brand,
+                            category: product.category,
+                            budget_band: product.budget_band,
+                            image_url: product.image_url,
+                        }}
+                        />
 
                         <Link href="/inquiry">
                           <Button variant="outline">Request Quote</Button>

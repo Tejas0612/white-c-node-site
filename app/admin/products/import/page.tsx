@@ -24,7 +24,11 @@ type CsvRow = {
   moq?: string
   lead_time?: string
   color_options?: string
-  tags?: string
+  tag_1?: string
+  tag_2?: string
+  tag_3?: string
+  tag_4?: string
+  tag_5?: string
   description?: string
   image_url?: string
   is_active?: string
@@ -73,6 +77,19 @@ function convertToBoolean(value: unknown, defaultValue: boolean) {
   return defaultValue
 }
 
+function combineTags(row: CsvRow) {
+  return [
+    row.tag_1,
+    row.tag_2,
+    row.tag_3,
+    row.tag_4,
+    row.tag_5,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(", ")
+}
+
 function createSku(row: CsvRow) {
   const rawSku = [
     row.name,
@@ -113,15 +130,15 @@ export default function ImportProductsPage() {
         const cleanedRows: ProductImportRow[] = results.data
           .filter(
             (row) =>
-                row.name &&
-                row.category &&
-                row.budget_band &&
-                row.occasion &&
-                row.recipient_type &&
-                row.use_case &&
-                row.industry &&
-                row.tags
-            )
+              row.name &&
+              row.category &&
+              row.budget_band &&
+              row.occasion &&
+              row.recipient_type &&
+              row.use_case &&
+              row.industry &&
+              row.tag_1
+          )
           .map((row) => ({
             sku: createSku(row),
             brand: cleanText(row.brand),
@@ -140,7 +157,7 @@ export default function ImportProductsPage() {
             moq: cleanText(row.moq),
             lead_time: cleanText(row.lead_time),
             color_options: cleanText(row.color_options),
-            tags: cleanText(row.tags),
+            tags: cleanText(combineTags(row)),
             description: cleanText(row.description),
             image_url: cleanText(row.image_url),
             is_active: convertToBoolean(row.is_active, true),
@@ -152,7 +169,7 @@ export default function ImportProductsPage() {
 
         if (cleanedRows.length === 0) {
           setError(
-            "No valid rows found. Make sure name, category, budget_band, occasion, recipient_type, use_case, industry, and tags columns are present."
+            "No valid rows found. Make sure name, category, budget_band, occasion, recipient_type, use_case, industry, and at least tag_1 are present."
           )
         }
       },
@@ -202,13 +219,14 @@ export default function ImportProductsPage() {
               <h1 className="mt-2 text-4xl font-bold">Import Products</h1>
 
               <p className="mt-3 text-muted-foreground">
-                Upload a CSV exported from Google Sheets to bulk add or update products in the white-c catalog.
+                Upload a CSV exported from Google Sheets to bulk add or update
+                products in the white-c catalog.
               </p>
             </div>
 
             <div className="flex flex-wrap gap-3">
               <a
-                href="/templates/white-c-google-sheet-product-import-fields-template.xlsx"
+                href="/templates/white-c-google-sheet-product-import-template-ai-fields.xlsx"
                 download
                 className="rounded-xl border px-5 py-3 font-semibold hover:bg-muted"
               >
@@ -228,7 +246,8 @@ export default function ImportProductsPage() {
             <h2 className="text-2xl font-semibold">CSV format</h2>
 
             <p className="mt-3 text-muted-foreground">
-              Download the Excel template, open it in Google Sheets, fill products, then export as CSV and upload here.
+              Download the Excel template, open it in Google Sheets, fill
+              products, then export as CSV and upload here.
             </p>
 
             <div className="mt-5 overflow-x-auto rounded-2xl bg-muted p-4 text-sm">
@@ -236,7 +255,8 @@ export default function ImportProductsPage() {
                 brand, name, category, budget_band, occasion, recipient_type,
                 use_case, industry, material, brandable_area, packaging,
                 logistics_type, delivery_window, moq, lead_time, color_options,
-                tags, description, image_url, is_active, is_featured
+                tag_1, tag_2, tag_3, tag_4, tag_5, description, image_url,
+                is_active, is_featured
               </code>
             </div>
 
@@ -246,11 +266,18 @@ export default function ImportProductsPage() {
               <p className="mt-2">
                 SKU is generated automatically using name, category, budget band,
                 material, and brand. If the generated SKU already exists, that
-                product will be updated. If it is new, a new product will be created.
+                product will be updated. If it is new, a new product will be
+                created.
               </p>
 
               <p className="mt-2">
-                Required fields: name, category, budget_band, and material.
+                Required fields: name, category, budget_band, occasion,
+                recipient_type, use_case, industry, and tag_1.
+              </p>
+
+              <p className="mt-2">
+                Tags are selected using tag_1 to tag_5. These are combined and
+                stored as one tags field in Supabase.
               </p>
             </div>
 
@@ -264,7 +291,9 @@ export default function ImportProductsPage() {
 
               {rows.length > 0 && (
                 <div className="rounded-2xl border bg-secondary p-5">
-                  <p className="font-semibold">{rows.length} valid products found.</p>
+                  <p className="font-semibold">
+                    {rows.length} valid products found.
+                  </p>
                   <p className="mt-1 text-sm text-muted-foreground">
                     Review the preview below, then click Import Products.
                   </p>
@@ -296,7 +325,7 @@ export default function ImportProductsPage() {
 
           {rows.length > 0 && (
             <div className="mt-10 overflow-x-auto rounded-3xl border">
-              <table className="w-full min-w-[1500px] border-collapse text-left">
+              <table className="w-full min-w-[1600px] border-collapse text-left">
                 <thead className="bg-muted">
                   <tr>
                     <th className="p-4">Auto SKU</th>
@@ -323,18 +352,38 @@ export default function ImportProductsPage() {
                       <td className="max-w-[220px] truncate p-4 text-muted-foreground">
                         {row.sku}
                       </td>
-                      <td className="p-4 text-muted-foreground">{row.brand || "-"}</td>
+                      <td className="p-4 text-muted-foreground">
+                        {row.brand || "-"}
+                      </td>
                       <td className="p-4 font-medium">{row.name}</td>
-                      <td className="p-4 text-muted-foreground">{row.category}</td>
-                      <td className="p-4 text-muted-foreground">{row.budget_band}</td>
-                      <td className="p-4 text-muted-foreground">{row.occasion || "-"}</td>
-                      <td className="p-4 text-muted-foreground">{row.recipient_type || "-"}</td>
-                      <td className="p-4 text-muted-foreground">{row.use_case || "-"}</td>
-                      <td className="p-4 text-muted-foreground">{row.industry || "-"}</td>
-                      <td className="p-4 text-muted-foreground">{row.material || "-"}</td>
-                      <td className="p-4 text-muted-foreground">{row.moq || "-"}</td>
-                      <td className="p-4 text-muted-foreground">{row.lead_time || "-"}</td>
-                      <td className="max-w-[180px] truncate p-4 text-muted-foreground">
+                      <td className="p-4 text-muted-foreground">
+                        {row.category}
+                      </td>
+                      <td className="p-4 text-muted-foreground">
+                        {row.budget_band}
+                      </td>
+                      <td className="p-4 text-muted-foreground">
+                        {row.occasion || "-"}
+                      </td>
+                      <td className="p-4 text-muted-foreground">
+                        {row.recipient_type || "-"}
+                      </td>
+                      <td className="p-4 text-muted-foreground">
+                        {row.use_case || "-"}
+                      </td>
+                      <td className="p-4 text-muted-foreground">
+                        {row.industry || "-"}
+                      </td>
+                      <td className="p-4 text-muted-foreground">
+                        {row.material || "-"}
+                      </td>
+                      <td className="p-4 text-muted-foreground">
+                        {row.moq || "-"}
+                      </td>
+                      <td className="p-4 text-muted-foreground">
+                        {row.lead_time || "-"}
+                      </td>
+                      <td className="max-w-[220px] truncate p-4 text-muted-foreground">
                         {row.tags || "-"}
                       </td>
                       <td className="p-4">{row.is_active ? "Yes" : "No"}</td>
@@ -346,7 +395,8 @@ export default function ImportProductsPage() {
 
               {rows.length > 20 && (
                 <div className="border-t p-4 text-sm text-muted-foreground">
-                  Showing first 20 rows only. All {rows.length} rows will be imported or updated.
+                  Showing first 20 rows only. All {rows.length} rows will be
+                  imported or updated.
                 </div>
               )}
             </div>
