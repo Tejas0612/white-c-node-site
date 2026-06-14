@@ -113,11 +113,15 @@ export default function ImportProductsPage() {
         const cleanedRows: ProductImportRow[] = results.data
           .filter(
             (row) =>
-              row.name &&
-              row.category &&
-              row.budget_band &&
-              row.material
-          )
+                row.name &&
+                row.category &&
+                row.budget_band &&
+                row.occasion &&
+                row.recipient_type &&
+                row.use_case &&
+                row.industry &&
+                row.tags
+            )
           .map((row) => ({
             sku: createSku(row),
             brand: cleanText(row.brand),
@@ -148,7 +152,7 @@ export default function ImportProductsPage() {
 
         if (cleanedRows.length === 0) {
           setError(
-            "No valid rows found. Make sure name, category, budget_band, and material columns are present."
+            "No valid rows found. Make sure name, category, budget_band, occasion, recipient_type, use_case, industry, and tags columns are present."
           )
         }
       },
@@ -204,7 +208,7 @@ export default function ImportProductsPage() {
 
             <div className="flex flex-wrap gap-3">
               <a
-                href="/templates/white-c-google-sheet-product-import-template-ai-fields.xlsx"
+                href="/templates/white-c-google-sheet-product-import-fields-template.xlsx"
                 download
                 className="rounded-xl border px-5 py-3 font-semibold hover:bg-muted"
               >
