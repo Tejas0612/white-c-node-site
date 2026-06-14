@@ -14,6 +14,7 @@ const NAV_LINKS = [
   { href: "/catalog", label: "Catalog" },
   { href: "/inquiry", label: "Inquiry" },
   { href: "/about", label: "About" },
+  { href: "/admin", label: "Admin" },
 ]
 
 export function Navbar() {
@@ -34,7 +35,7 @@ export function Navbar() {
               href={link.href}
               className={cn(
                 "rounded-md px-3 py-2 text-sm font-medium transition-colors hover:text-foreground",
-                pathname === link.href ? "text-foreground" : "text-muted-foreground",
+                pathname === link.href ? "text-foreground" : "text-muted-foreground"
               )}
             >
               {link.label}
@@ -71,12 +72,13 @@ export function Navbar() {
                   "rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
                   pathname === link.href
                     ? "bg-secondary text-foreground"
-                    : "text-muted-foreground hover:bg-secondary",
+                    : "text-muted-foreground hover:bg-secondary"
                 )}
               >
                 {link.label}
               </Link>
             ))}
+
             <Link href="/inquiry" onClick={() => setOpen(false)}>
               <Button className="mt-2 w-full" size="lg">
                 Request a Quote
