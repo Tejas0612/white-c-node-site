@@ -23,13 +23,22 @@ export default async function AdminProductsPage() {
               <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                 Admin Portal
               </p>
+
               <h1 className="mt-2 text-4xl font-bold">Manage Products</h1>
+
               <p className="mt-3 text-muted-foreground">
-                Add, edit, delete, and manage products for the white-c catalog.
+                Add, import, edit, delete, and manage products for the white-c catalog.
               </p>
             </div>
 
             <div className="flex flex-wrap gap-3">
+              <Link
+                href="/admin/products/import"
+                className="rounded-xl border px-5 py-3 font-semibold hover:bg-muted"
+              >
+                Import CSV
+              </Link>
+
               <Link
                 href="/admin/products/new"
                 className="rounded-xl bg-black px-5 py-3 font-semibold text-white"
@@ -46,9 +55,10 @@ export default async function AdminProductsPage() {
           )}
 
           <div className="mt-10 overflow-x-auto rounded-3xl border">
-            <table className="w-full min-w-[900px] border-collapse text-left">
+            <table className="w-full min-w-[1000px] border-collapse text-left">
               <thead className="bg-muted">
                 <tr>
+                  <th className="p-4">SKU</th>
                   <th className="p-4">Product</th>
                   <th className="p-4">Category</th>
                   <th className="p-4">Budget</th>
@@ -63,6 +73,7 @@ export default async function AdminProductsPage() {
                 {products && products.length > 0 ? (
                   products.map((product) => (
                     <tr key={product.id} className="border-t">
+                      <td className="p-4 text-muted-foreground">{product.sku || "-"}</td>
                       <td className="p-4 font-medium">{product.name}</td>
                       <td className="p-4 text-muted-foreground">{product.category}</td>
                       <td className="p-4 text-muted-foreground">{product.budget_band}</td>
@@ -85,7 +96,7 @@ export default async function AdminProductsPage() {
                   ))
                 ) : (
                   <tr>
-                    <td className="p-6 text-muted-foreground" colSpan={7}>
+                    <td className="p-6 text-muted-foreground" colSpan={8}>
                       No products added yet.
                     </td>
                   </tr>

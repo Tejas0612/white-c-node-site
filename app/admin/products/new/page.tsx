@@ -21,6 +21,7 @@ export default function NewProductPage() {
     setError("")
 
     const payload = {
+      sku: formData.get("sku"),
       name: formData.get("name"),
       category: formData.get("category"),
       budget_band: formData.get("budget_band"),
@@ -68,21 +69,28 @@ export default function NewProductPage() {
           <form className="mt-10 grid gap-5" onSubmit={handleSubmit}>
             <div className="grid gap-5 md:grid-cols-2">
               <input
+                name="sku"
+                className="rounded-xl border bg-background p-4"
+                placeholder="SKU / Product code e.g. WBOTTLE001"
+                required
+              />
+
+              <input
                 name="name"
                 className="rounded-xl border bg-background p-4"
                 placeholder="Product name"
                 required
               />
+            </div>
 
+            <div className="grid gap-5 md:grid-cols-2">
               <input
                 name="category"
                 className="rounded-xl border bg-background p-4"
                 placeholder="Category e.g. Drinkware, Apparel"
                 required
               />
-            </div>
 
-            <div className="grid gap-5 md:grid-cols-2">
               <select
                 name="budget_band"
                 className="rounded-xl border bg-background p-4"
@@ -94,11 +102,19 @@ export default function NewProductPage() {
                 <option>₹500–₹1000</option>
                 <option>₹1000+</option>
               </select>
+            </div>
 
+            <div className="grid gap-5 md:grid-cols-2">
               <input
                 name="moq"
                 className="rounded-xl border bg-background p-4"
                 placeholder="MOQ e.g. 100 units"
+              />
+
+              <input
+                name="lead_time"
+                className="rounded-xl border bg-background p-4"
+                placeholder="Lead time e.g. 7–12 days"
               />
             </div>
 
@@ -116,19 +132,11 @@ export default function NewProductPage() {
               />
             </div>
 
-            <div className="grid gap-5 md:grid-cols-2">
-              <input
-                name="material"
-                className="rounded-xl border bg-background p-4"
-                placeholder="Material e.g. steel, cotton, paper"
-              />
-
-              <input
-                name="lead_time"
-                className="rounded-xl border bg-background p-4"
-                placeholder="Lead time e.g. 7–12 days"
-              />
-            </div>
+            <input
+              name="material"
+              className="rounded-xl border bg-background p-4"
+              placeholder="Material e.g. steel, cotton, paper"
+            />
 
             <input
               name="branding_available"

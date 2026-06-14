@@ -46,6 +46,7 @@ export default function EditProductPage() {
     setError("")
 
     const payload = {
+      sku: formData.get("sku"),
       name: formData.get("name"),
       category: formData.get("category"),
       budget_band: formData.get("budget_band"),
@@ -124,13 +125,23 @@ export default function EditProductPage() {
           <form className="mt-10 grid gap-5" onSubmit={handleSubmit}>
             <div className="grid gap-5 md:grid-cols-2">
               <input
+                name="sku"
+                defaultValue={product.sku || ""}
+                className="rounded-xl border bg-background p-4"
+                placeholder="SKU / Product code e.g. WBOTTLE001"
+                required
+              />
+
+              <input
                 name="name"
                 defaultValue={product.name || ""}
                 className="rounded-xl border bg-background p-4"
                 placeholder="Product name"
                 required
               />
+            </div>
 
+            <div className="grid gap-5 md:grid-cols-2">
               <input
                 name="category"
                 defaultValue={product.category || ""}
@@ -138,9 +149,7 @@ export default function EditProductPage() {
                 placeholder="Category e.g. Drinkware, Apparel"
                 required
               />
-            </div>
 
-            <div className="grid gap-5 md:grid-cols-2">
               <select
                 name="budget_band"
                 defaultValue={product.budget_band || ""}
@@ -153,12 +162,21 @@ export default function EditProductPage() {
                 <option>₹500–₹1000</option>
                 <option>₹1000+</option>
               </select>
+            </div>
 
+            <div className="grid gap-5 md:grid-cols-2">
               <input
                 name="moq"
                 defaultValue={product.moq || ""}
                 className="rounded-xl border bg-background p-4"
                 placeholder="MOQ e.g. 100 units"
+              />
+
+              <input
+                name="lead_time"
+                defaultValue={product.lead_time || ""}
+                className="rounded-xl border bg-background p-4"
+                placeholder="Lead time e.g. 7–12 days"
               />
             </div>
 
@@ -178,21 +196,12 @@ export default function EditProductPage() {
               />
             </div>
 
-            <div className="grid gap-5 md:grid-cols-2">
-              <input
-                name="material"
-                defaultValue={product.material || ""}
-                className="rounded-xl border bg-background p-4"
-                placeholder="Material e.g. steel, cotton, paper"
-              />
-
-              <input
-                name="lead_time"
-                defaultValue={product.lead_time || ""}
-                className="rounded-xl border bg-background p-4"
-                placeholder="Lead time e.g. 7–12 days"
-              />
-            </div>
+            <input
+              name="material"
+              defaultValue={product.material || ""}
+              className="rounded-xl border bg-background p-4"
+              placeholder="Material e.g. steel, cotton, paper"
+            />
 
             <input
               name="branding_available"
