@@ -12,7 +12,15 @@ type InquiryProduct = {
   image_url?: string | null
 }
 
-export function AddToInquiryButton({ product }: { product: InquiryProduct }) {
+type AddToInquiryButtonProps = {
+  product: InquiryProduct
+  className?: string
+}
+
+export function AddToInquiryButton({
+  product,
+  className,
+}: AddToInquiryButtonProps) {
   const [added, setAdded] = useState(false)
 
   function handleAdd() {
@@ -20,7 +28,9 @@ export function AddToInquiryButton({ product }: { product: InquiryProduct }) {
       localStorage.getItem("whitec_inquiry_products") || "[]"
     )
 
-    const alreadyExists = existing.some((item: InquiryProduct) => item.id === product.id)
+    const alreadyExists = existing.some(
+      (item: InquiryProduct) => item.id === product.id
+    )
 
     const updated = alreadyExists ? existing : [...existing, product]
 
@@ -29,8 +39,8 @@ export function AddToInquiryButton({ product }: { product: InquiryProduct }) {
   }
 
   return (
-    <Button type="button" onClick={handleAdd}>
-      {added ? "Added to Inquiry" : "Add to Inquiry"}
+    <Button type="button" onClick={handleAdd} className={className}>
+      {added ? "Added" : "Add to Inquiry"}
     </Button>
   )
 }
