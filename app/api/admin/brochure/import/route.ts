@@ -28,6 +28,15 @@ function cleanText(value: unknown) {
   return text.length > 0 ? text : null
 }
 
+function cleanFeatures(value: unknown) {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .map((feature) => String(feature || "").trim())
+    .filter(Boolean)
+    .slice(0, 8)
+}
+
 export async function POST(request: Request) {
   try {
     const { products } = await request.json()
@@ -92,6 +101,45 @@ export async function POST(request: Request) {
         { success: false, message: error.message },
         { status: 500 }
       )
+    }
+
+    for (let index = 0; index < products.length; index++) {
+      const product = products[index]
+      const sku = createBrochureSku(product)
+      const imageUrl = cleanText(product.image_url)
+      const imageFilename = cleanText(product.image_filename)
+      const features = cleanFeatures(product.features)
+
+      if (imageUrl) {
+        await supabaseAdmin
+          .from("product_images")
+          .delete()
+          .eq("product_sku", sku)
+          .eq("sort_order", 1)
+
+        await supabaseAdmin.from("product_images").insert({
+          product_sku: sku,
+          image_url: imageUrl,
+          image_filename: imageFilename,
+          image_type: "main",
+          sort_order: 1,
+        })
+      }
+
+      await supabaseAdmin
+        .from("product_features")
+        .delete()
+        .eq("product_sku", sku)
+
+      if (features.length > 0) {
+        await supabaseAdmin.from("product_features").insert(
+          features.map((feature, featureIndex) => ({
+            product_sku: sku,
+            feature_text: feature,
+            sort_order: featureIndex + 1,
+          }))
+        )
+      }
     }
 
     return Response.json({

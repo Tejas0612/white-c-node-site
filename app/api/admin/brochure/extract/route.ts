@@ -12,13 +12,6 @@ export const maxDuration = 120
 
 const execFileAsync = promisify(execFile)
 
-type CropBox = {
-  x: number
-  y: number
-  width: number
-  height: number
-}
-
 type AiExtractedProduct = {
   name?: string
   category?: string
@@ -41,7 +34,7 @@ type AiExtractedProduct = {
   tag_4?: string | null
   tag_5?: string | null
   description?: string
-  crop_box?: CropBox | null
+  features?: string[]
 }
 
 type ExtractedProduct = {
@@ -67,6 +60,7 @@ type ExtractedProduct = {
   tag_4: string | null
   tag_5: string | null
   description: string
+  features: string[]
   image_url: string | null
   image_filename: string | null
   source_brochure: string
@@ -95,70 +89,13 @@ function cleanJsonText(value: string) {
     .trim()
 }
 
-function normalizeCropBox(cropBox: CropBox | null | undefined): CropBox | null {
-  if (!cropBox) return null
+function cleanFeatures(features: unknown) {
+  if (!Array.isArray(features)) return []
 
-  const x = Number(cropBox.x)
-  const y = Number(cropBox.y)
-  const width = Number(cropBox.width)
-  const height = Number(cropBox.height)
-
-  if (
-    Number.isNaN(x) ||
-    Number.isNaN(y) ||
-    Number.isNaN(width) ||
-    Number.isNaN(height)
-  ) {
-    return null
-  }
-
-  if (width <= 8 || height <= 8) {
-    return null
-  }
-
-  return {
-    x: Math.max(0, Math.min(100, x)),
-    y: Math.max(0, Math.min(100, y)),
-    width: Math.max(8, Math.min(100, width)),
-    height: Math.max(8, Math.min(100, height)),
-  }
-}
-
-function isBadCrop(cropBox: CropBox | null) {
-  if (!cropBox) return true
-
-  const area = cropBox.width * cropBox.height
-
-  const looksLikeFullPage =
-    cropBox.x <= 8 &&
-    cropBox.y <= 8 &&
-    cropBox.width >= 75 &&
-    cropBox.height >= 65
-
-  const tooTiny = area < 500
-  const tooLarge = area > 4200
-
-  return looksLikeFullPage || tooTiny || tooLarge
-}
-
-function getFallbackCropProfile(brand: string, brochureName: string): CropBox {
-  const key = `${brand} ${brochureName}`.toLowerCase()
-
-  if (key.includes("fuzo")) {
-    return {
-      x: 23,
-      y: 2,
-      width: 48,
-      height: 38,
-    }
-  }
-
-  return {
-    x: 15,
-    y: 0,
-    width: 70,
-    height: 48,
-  }
+  return features
+    .map((feature) => String(feature || "").trim())
+    .filter(Boolean)
+    .slice(0, 8)
 }
 
 function normalizeProduct(
@@ -170,6 +107,8 @@ function normalizeProduct(
   imageUrl: string | null,
   imageFilename: string | null
 ): ExtractedProduct {
+  const features = cleanFeatures(product.features)
+
   return {
     brand,
     name: String(product.name || `Product ${page}-${position}`).trim(),
@@ -196,6 +135,7 @@ function normalizeProduct(
       product.description ||
         "Corporate gifting product suitable for employee and client gifting."
     ).trim(),
+    features,
     image_url: imageUrl,
     image_filename: imageFilename,
     source_brochure: brochureName,
@@ -226,8 +166,6 @@ async function convertPdfPageToImage(
 
   for (const binaryPath of possiblePaths) {
     try {
-      console.log("Trying pdftocairo binary:", binaryPath)
-
       await execFileAsync(binaryPath, [
         "-jpeg",
         "-f",
@@ -241,13 +179,9 @@ async function convertPdfPageToImage(
         outputPrefix,
       ])
 
-      const imagePath = `${outputPrefix}.jpg`
-      console.log("PDF converted image path:", imagePath)
-
-      return imagePath
+      return `${outputPrefix}.jpg`
     } catch (error) {
       lastError = error
-      console.log("pdftocairo failed for:", binaryPath)
     }
   }
 
@@ -258,88 +192,89 @@ async function convertPdfPageToImage(
   )
 }
 
-async function getExistingCropProfile(
+function getBestKnownImageFolder(brand: string, brochureName: string) {
+  const key = `${brand} ${brochureName}`.toLowerCase()
+
+  if (key.includes("fuzo")) {
+    return "fuzo-may-2026"
+  }
+
+  return null
+}
+
+async function findBestKnownImageUrl(
   brand: string,
   brochureName: string,
-  layoutKey: string
-): Promise<CropBox | null> {
-  const { data, error } = await supabaseAdmin
-    .from("brochure_crop_profiles")
-    .select("crop_x, crop_y, crop_width, crop_height")
-    .eq("brand", brand)
-    .eq("brochure_name", brochureName)
-    .eq("layout_key", layoutKey)
-    .maybeSingle()
+  page: number,
+  position: number
+) {
+  const folder = getBestKnownImageFolder(brand, brochureName)
+
+  if (!folder) return null
+
+  const pagePart = `p${String(page).padStart(3, "0")}`
+  const positionPart = String(position).padStart(2, "0")
+  const expectedPrefix = `${slugify(brochureName)}-${pagePart}-${positionPart}-`
+
+  const { data, error } = await supabaseAdmin.storage
+    .from("product-images")
+    .list(folder, {
+      limit: 1000,
+      offset: 0,
+    })
 
   if (error) {
-    console.log("Crop profile lookup error:", error.message)
+    console.log("Known image lookup error:", error.message)
     return null
   }
 
-  if (!data) return null
+  const matchedFile = data?.find((file) => file.name.startsWith(expectedPrefix))
+
+  if (!matchedFile) return null
+
+  const storagePath = `${folder}/${matchedFile.name}`
+
+  const { data: publicData } = supabaseAdmin.storage
+    .from("product-images")
+    .getPublicUrl(storagePath)
 
   return {
-    x: Number(data.crop_x),
-    y: Number(data.crop_y),
-    width: Number(data.crop_width),
-    height: Number(data.crop_height),
+    imageUrl: publicData.publicUrl,
+    imageFilename: matchedFile.name,
   }
 }
 
-async function saveCropProfile(
+async function createWideCatalogImage(
+  imagePath: string,
   brand: string,
-  brochureName: string,
-  layoutKey: string,
-  cropBox: CropBox
+  brochureName: string
 ) {
-  const { error } = await supabaseAdmin
-    .from("brochure_crop_profiles")
-    .upsert(
-      {
-        brand,
-        brochure_name: brochureName,
-        layout_key: layoutKey,
-        crop_x: cropBox.x,
-        crop_y: cropBox.y,
-        crop_width: cropBox.width,
-        crop_height: cropBox.height,
-        confidence: 0.85,
-        updated_at: new Date().toISOString(),
-      },
-      {
-        onConflict: "brand,brochure_name,layout_key",
-      }
-    )
-
-  if (error) {
-    console.log("Crop profile save error:", error.message)
-  }
-}
-
-async function cropProductImage(imagePath: string, cropBox: CropBox) {
-  const image = sharp(imagePath)
-  const metadata = await image.metadata()
+  const metadata = await sharp(imagePath).metadata()
 
   const imageWidth = metadata.width || 0
   const imageHeight = metadata.height || 0
 
   if (!imageWidth || !imageHeight) {
-    return sharp(imagePath).jpeg({ quality: 92 }).toBuffer()
+    return sharp(imagePath)
+      .resize({
+        width: 1200,
+        withoutEnlargement: true,
+      })
+      .jpeg({ quality: 92 })
+      .toBuffer()
   }
 
-  console.log("Final crop box used:", cropBox)
+  const key = `${brand} ${brochureName}`.toLowerCase()
 
-  const paddingPercent = 2
+  const crop =
+    key.includes("fuzo")
+      ? { x: 6, y: 0, width: 88, height: 47 }
+      : { x: 6, y: 0, width: 88, height: 55 }
 
-  const paddedX = Math.max(0, cropBox.x - paddingPercent)
-  const paddedY = Math.max(0, cropBox.y - paddingPercent)
-  const paddedWidth = Math.min(100 - paddedX, cropBox.width + paddingPercent * 2)
-  const paddedHeight = Math.min(100 - paddedY, cropBox.height + paddingPercent * 2)
-
-  const left = Math.round((paddedX / 100) * imageWidth)
-  const top = Math.round((paddedY / 100) * imageHeight)
-  const width = Math.round((paddedWidth / 100) * imageWidth)
-  const height = Math.round((paddedHeight / 100) * imageHeight)
+  const left = Math.round((crop.x / 100) * imageWidth)
+  const top = Math.round((crop.y / 100) * imageHeight)
+  const width = Math.round((crop.width / 100) * imageWidth)
+  const height = Math.round((crop.height / 100) * imageHeight)
 
   return sharp(imagePath)
     .extract({
@@ -349,14 +284,14 @@ async function cropProductImage(imagePath: string, cropBox: CropBox) {
       height: Math.min(height, imageHeight - top),
     })
     .resize({
-      width: 900,
+      width: 1200,
       withoutEnlargement: true,
     })
     .jpeg({ quality: 92 })
     .toBuffer()
 }
 
-async function uploadProductImageToSupabase(
+async function uploadGeneratedImageToSupabase(
   imageBuffer: Buffer,
   brochureName: string,
   page: number,
@@ -374,9 +309,6 @@ async function uploadProductImageToSupabase(
 
   const storagePath = `brochures/${slugify(brochureName)}/${imageFilename}`
 
-  console.log("Trying to upload cropped product image:", storagePath)
-  console.log("Image buffer size:", imageBuffer.length)
-
   const { error } = await supabaseAdmin.storage
     .from("product-images")
     .upload(storagePath, imageBuffer, {
@@ -386,7 +318,6 @@ async function uploadProductImageToSupabase(
     })
 
   if (error) {
-    console.log("Supabase upload error:", error)
     throw new Error(error.message)
   }
 
@@ -394,12 +325,8 @@ async function uploadProductImageToSupabase(
     .from("product-images")
     .getPublicUrl(storagePath)
 
-  const publicUrlWithCacheBust = `${data.publicUrl}?v=${uniqueRunId}`
-
-  console.log("Public image URL:", publicUrlWithCacheBust)
-
   return {
-    imageUrl: publicUrlWithCacheBust,
+    imageUrl: `${data.publicUrl}?v=${uniqueRunId}`,
     imageFilename,
   }
 }
@@ -408,21 +335,10 @@ async function extractProductsFromImage(
   imagePath: string,
   brand: string,
   brochureName: string,
-  page: number,
-  shouldAskForCrop: boolean
+  page: number
 ) {
   const imageBuffer = await fs.readFile(imagePath)
   const base64Image = imageBuffer.toString("base64")
-
-  const cropInstruction = shouldAskForCrop
-    ? `
-Also return crop_box for the main product photo area.
-crop_box must use percentage coordinates from 0 to 100 relative to the full page.
-Do not include footer, page title, body text, logo, or page number.
-`
-    : `
-Do not return crop_box. The system already has a crop profile.
-`
 
   const prompt = `
 You are extracting product data from a corporate gifting brochure page image.
@@ -437,8 +353,6 @@ Return ONLY valid JSON array. No markdown. No explanation.
 
 If there is one product on the page, return one object.
 If there are multiple products on the page, return multiple objects in top-to-bottom / left-to-right order.
-
-${cropInstruction}
 
 Use this exact JSON shape:
 [
@@ -464,23 +378,21 @@ Use this exact JSON shape:
     "tag_4": null,
     "tag_5": null,
     "description": "",
-    "crop_box": {
-      "x": 23,
-      "y": 2,
-      "width": 48,
-      "height": 38
-    }
+    "features": []
   }
 ]
 
 Rules:
-- Do not invent product names if the page clearly shows a product title.
 - Use the visible product title from the page.
 - Do not return actual prices.
-- If exact budget is not visible, infer a broad corporate gifting budget band.
-- category must be one of: Drinkware, Tech Accessories, Desk Accessories, Bags, Home & Living, Wellness, Stationery, Others.
+- Read feature icons, specification text, battery/capacity, material, handle, closure, charging, size, speed, compatibility, and usage notes if visible.
+- Description must be 18 to 35 words.
+- Description must include 3 to 5 useful product features when visible.
+- Do not use only generic wording like "suitable for corporate gifting".
+- features must contain 3 to 8 short bullet points based on visible features/specifications.
+- category must be one of: Drinkware, Tech Accessories, Desk Accessories, Bags, Home & Living, Wellness, Stationery, Lifestyle, Travel Accessories, Others.
 - budget_band must be one of: Under ₹250, ₹250–₹500, ₹500–₹1000, ₹1000+.
-- occasion must be one of: Employee onboarding, Diwali gifting, Client appreciation, Event giveaway, Corporate gifting.
+- occasion must be one of: Employee onboarding, Diwali gifting, Client appreciation, Event giveaway, Conference / Event, Corporate gifting.
 - recipient_type must be one of: Employees, Clients, Leadership, Sales team, Ground staff, Others.
 - use_case must be one of: Employee gifting, Client gifting, Bulk gifting, Premium gifting, Event gifting.
 - industry must be one of: IT, BFSI, Pharma, Manufacturing, Real Estate, Education, Others.
@@ -582,20 +494,14 @@ export async function POST(request: Request) {
     const pdfBuffer = Buffer.from(await file.arrayBuffer())
     const products: ExtractedProduct[] = []
 
-    const layoutKey = "default-product-hero"
-    let cropProfile = await getExistingCropProfile(brand, brochureName, layoutKey)
-
     for (let page = startPage; page <= endPage; page++) {
       const imagePath = await convertPdfPageToImage(pdfBuffer, page, tempDir)
-
-      const shouldAskForCrop = cropProfile === null
 
       const extractedProducts = await extractProductsFromImage(
         imagePath,
         brand,
         brochureName,
-        page,
-        shouldAskForCrop
+        page
       )
 
       const finalExtractedProducts =
@@ -614,34 +520,38 @@ export async function POST(request: Request) {
                 tag_2: "Premium",
                 description:
                   "Corporate gifting product suitable for employee and client gifting.",
+                features: ["Corporate gifting product"],
               },
             ]
-
-      if (!cropProfile) {
-        const firstCropBox = normalizeCropBox(finalExtractedProducts[0]?.crop_box)
-
-        if (firstCropBox && !isBadCrop(firstCropBox)) {
-          cropProfile = firstCropBox
-        } else {
-          cropProfile = getFallbackCropProfile(brand, brochureName)
-        }
-
-        await saveCropProfile(brand, brochureName, layoutKey, cropProfile)
-      }
 
       for (let index = 0; index < finalExtractedProducts.length; index++) {
         const position = index + 1
         const extractedProduct = finalExtractedProducts[index]
 
-        const croppedImageBuffer = await cropProductImage(imagePath, cropProfile)
-
-        const uploadedImage = await uploadProductImageToSupabase(
-          croppedImageBuffer,
+        const knownImage = await findBestKnownImageUrl(
+          brand,
           brochureName,
           page,
-          position,
-          extractedProduct.name || `Product ${page}-${position}`
+          position
         )
+
+        let imageData = knownImage
+
+        if (!imageData) {
+          const generatedImageBuffer = await createWideCatalogImage(
+            imagePath,
+            brand,
+            brochureName
+          )
+
+          imageData = await uploadGeneratedImageToSupabase(
+            generatedImageBuffer,
+            brochureName,
+            page,
+            position,
+            extractedProduct.name || `Product ${page}-${position}`
+          )
+        }
 
         products.push(
           normalizeProduct(
@@ -650,8 +560,8 @@ export async function POST(request: Request) {
             brochureName,
             page,
             position,
-            uploadedImage.imageUrl,
-            uploadedImage.imageFilename
+            imageData.imageUrl,
+            imageData.imageFilename
           )
         )
       }
