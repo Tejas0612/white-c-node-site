@@ -22,18 +22,18 @@ const navItems = [
     href: "/admin/workflow/team",
   },
   {
-    label: "Products",
+    label: "Catalog",
     href: "/admin/products",
   },
   {
-    label: "Brochure Import",
+    label: "Import Brochure",
     href: "/admin/brochure-import",
   },
 ]
 
 export function WorkflowSidebar() {
   return (
-    <aside className="hidden min-h-screen w-72 border-r bg-background lg:block">
+    <aside className="hidden min-h-screen w-72 shrink-0 border-r bg-background lg:block">
       <div className="border-b p-6">
         <h1 className="text-2xl font-bold tracking-tight">WHITE C</h1>
         <p className="mt-1 text-sm text-muted-foreground">Admin Workflow</p>
