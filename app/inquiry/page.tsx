@@ -1,8 +1,11 @@
 "use client"
 
+import { useEffect, useMemo, useState } from "react"
+import Image from "next/image"
+import Link from "next/link"
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
-import { useEffect, useState } from "react"
+import { Button } from "@/components/ui/button"
 
 type InquiryProduct = {
   id: string
@@ -11,64 +14,190 @@ type InquiryProduct = {
   category?: string | null
   budget_band?: string | null
   image_url?: string | null
+  quantity?: number
 }
 
+type InquiryForm = {
+  name: string
+  company: string
+  email: string
+  phone: string
+  requirement: string
+}
+
+const STORAGE_KEY = "whitec_inquiry_products"
+
 export default function InquiryPage() {
-  const [submitted, setSubmitted] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [products, setProducts] = useState<InquiryProduct[]>([])
+  const [quantityInputs, setQuantityInputs] = useState<Record<string, string>>(
+    {}
+  )
+  const [form, setForm] = useState<InquiryForm>({
+    name: "",
+    company: "",
+    email: "",
+    phone: "",
+    requirement: "",
+  })
+  const [isSending, setIsSending] = useState(false)
+  const [message, setMessage] = useState("")
   const [error, setError] = useState("")
-  const [selectedProducts, setSelectedProducts] = useState<InquiryProduct[]>([])
 
   useEffect(() => {
-    const savedProducts = JSON.parse(
-      localStorage.getItem("whitec_inquiry_products") || "[]"
+    const savedProducts = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]")
+
+    const productsWithQuantity = savedProducts.map(
+      (product: InquiryProduct) => ({
+        ...product,
+        quantity: Number(product.quantity || 1),
+      })
     )
 
-    setSelectedProducts(savedProducts)
+    const initialQuantityInputs: Record<string, string> = {}
+
+    productsWithQuantity.forEach((product: InquiryProduct) => {
+      initialQuantityInputs[product.id] = String(product.quantity || 1)
+    })
+
+    setProducts(productsWithQuantity)
+    setQuantityInputs(initialQuantityInputs)
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(productsWithQuantity))
   }, [])
 
+  const totalQuantity = useMemo(() => {
+    return products.reduce(
+      (total, product) => total + Number(product.quantity || 1),
+      0
+    )
+  }, [products])
+
+  function updateLocalStorage(updatedProducts: InquiryProduct[]) {
+    setProducts(updatedProducts)
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedProducts))
+  }
+
+  function setProductQuantity(productId: string, quantity: number) {
+    const safeQuantity = Math.max(1, quantity)
+
+    const updatedProducts = products.map((product) =>
+      product.id === productId
+        ? {
+            ...product,
+            quantity: safeQuantity,
+          }
+        : product
+    )
+
+    setQuantityInputs((currentInputs) => ({
+      ...currentInputs,
+      [productId]: String(safeQuantity),
+    }))
+
+    updateLocalStorage(updatedProducts)
+  }
+
+  function handleQuantityTyping(productId: string, value: string) {
+    const onlyNumbers = value.replace(/\D/g, "")
+
+    setQuantityInputs((currentInputs) => ({
+      ...currentInputs,
+      [productId]: onlyNumbers,
+    }))
+
+    if (!onlyNumbers) {
+      return
+    }
+
+    const updatedProducts = products.map((product) =>
+      product.id === productId
+        ? {
+            ...product,
+            quantity: Math.max(1, Number(onlyNumbers)),
+          }
+        : product
+    )
+
+    updateLocalStorage(updatedProducts)
+  }
+
+  function handleQuantityBlur(productId: string) {
+    const currentValue = quantityInputs[productId]
+
+    if (!currentValue || Number(currentValue) < 1) {
+      setProductQuantity(productId, 1)
+    }
+  }
+
+  function decreaseQuantity(productId: string) {
+    const product = products.find((item) => item.id === productId)
+    const currentQuantity = Number(product?.quantity || 1)
+
+    setProductQuantity(productId, Math.max(1, currentQuantity - 1))
+  }
+
+  function increaseQuantity(productId: string) {
+    const product = products.find((item) => item.id === productId)
+    const currentQuantity = Number(product?.quantity || 1)
+
+    setProductQuantity(productId, currentQuantity + 1)
+  }
+
   function removeProduct(productId: string) {
-    const updatedProducts = selectedProducts.filter(
+    const updatedProducts = products.filter(
       (product) => product.id !== productId
     )
 
-    setSelectedProducts(updatedProducts)
+    const updatedQuantityInputs = { ...quantityInputs }
+    delete updatedQuantityInputs[productId]
 
-    localStorage.setItem(
-      "whitec_inquiry_products",
-      JSON.stringify(updatedProducts)
-    )
+    setQuantityInputs(updatedQuantityInputs)
+    updateLocalStorage(updatedProducts)
   }
 
-  function clearProducts() {
-    setSelectedProducts([])
-    localStorage.removeItem("whitec_inquiry_products")
+  function clearInquiryList() {
+    setQuantityInputs({})
+    updateLocalStorage([])
   }
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  function updateForm(field: keyof InquiryForm, value: string) {
+    setForm((currentForm) => ({
+      ...currentForm,
+      [field]: value,
+    }))
+  }
+
+  async function submitInquiry(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
-    const form = event.currentTarget
-    const formData = new FormData(form)
-
-    setLoading(true)
+    setMessage("")
     setError("")
-    setSubmitted(false)
 
-    const payload = {
-      companyName: formData.get("companyName"),
-      contactPerson: formData.get("contactPerson"),
-      email: formData.get("email"),
-      phone: formData.get("phone"),
-      budgetBand: formData.get("budgetBand"),
-      quantity: formData.get("quantity"),
-      occasion: formData.get("occasion"),
-      deliveryCity: formData.get("deliveryCity"),
-      brandingRequired: formData.get("brandingRequired"),
-      timeline: formData.get("timeline"),
-      message: formData.get("message"),
-      selectedProducts,
+    if (products.length === 0) {
+      setError("Please add at least one product to your inquiry list.")
+      return
     }
+
+    if (!form.name.trim()) {
+      setError("Please enter your name.")
+      return
+    }
+
+    if (!form.email.trim()) {
+      setError("Please enter your email.")
+      return
+    }
+
+    if (!form.phone.trim()) {
+      setError("Please enter your phone number.")
+      return
+    }
+
+    const finalProducts = products.map((product) => ({
+      ...product,
+      quantity: Math.max(1, Number(product.quantity || 1)),
+    }))
+
+    setIsSending(true)
 
     try {
       const response = await fetch("/api/inquiry", {
@@ -76,24 +205,38 @@ export default function InquiryPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          customer: form,
+          products: finalProducts,
+        }),
       })
 
       const result = await response.json()
 
-      if (!result.success) {
-        setError(result.message || "Inquiry could not be sent. Please try again.")
-        return
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Failed to send inquiry.")
       }
 
-      setSubmitted(true)
-      form.reset()
-      setSelectedProducts([])
-      localStorage.removeItem("whitec_inquiry_products")
-    } catch {
-      setError("Something went wrong. Please try again.")
+      setMessage(
+        "Your inquiry has been sent successfully. Our team will contact you soon."
+      )
+
+      setForm({
+        name: "",
+        company: "",
+        email: "",
+        phone: "",
+        requirement: "",
+      })
+
+      clearInquiryList()
+    } catch (submitError: any) {
+      setError(
+        submitError?.message ||
+          "Something went wrong while sending your inquiry."
+      )
     } finally {
-      setLoading(false)
+      setIsSending(false)
     }
   }
 
@@ -101,254 +244,253 @@ export default function InquiryPage() {
     <div className="flex min-h-screen flex-col">
       <Navbar />
 
-      <main className="flex-1">
-        <section className="px-6 py-20">
-          <div className="mx-auto grid max-w-7xl gap-12 lg:grid-cols-[1.2fr_0.8fr]">
-            <div>
-              <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Request Quote
-              </p>
+      <main className="flex-1 px-6 py-16">
+        <div className="mx-auto max-w-7xl">
+          <div className="max-w-3xl">
+            <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Request a Quote
+            </p>
 
-              <h1 className="text-4xl font-bold tracking-tight md:text-6xl">
-                Tell us your gifting requirement.
-              </h1>
+            <h1 className="text-4xl font-bold tracking-tight md:text-6xl">
+              Share your gifting requirement.
+            </h1>
 
-              <p className="mt-5 max-w-2xl text-lg text-muted-foreground">
-                Share your budget band, quantity, occasion, and branding needs.
-                Our team will help you with curated options and a custom quote.
-              </p>
+            <p className="mt-5 text-lg text-muted-foreground">
+              Review selected products, add approximate quantities, and send
+              your requirement. We will get back with suitable options and
+              pricing.
+            </p>
+          </div>
 
-              {selectedProducts.length > 0 ? (
-                <div className="mt-10 rounded-3xl border bg-card p-6">
-                  <div className="flex flex-wrap items-center justify-between gap-4">
-                    <div>
-                      <h2 className="text-2xl font-semibold">
-                        Selected Products
-                      </h2>
-
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        These products will be included in your inquiry.
-                      </p>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={clearProducts}
-                      className="rounded-xl border px-4 py-2 text-sm font-medium hover:bg-muted"
-                    >
-                      Clear All
-                    </button>
-                  </div>
-
-                  <div className="mt-5 grid gap-4">
-                    {selectedProducts.map((product) => (
-                      <div
-                        key={product.id}
-                        className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border p-4"
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className="flex size-16 items-center justify-center overflow-hidden rounded-xl bg-muted">
-                            {product.image_url ? (
-                              <img
-                                src={product.image_url}
-                                alt={product.name}
-                                className="h-full w-full object-cover"
-                              />
-                            ) : (
-                              <span className="text-xs text-muted-foreground">
-                                Image
-                              </span>
-                            )}
-                          </div>
-
-                          <div>
-                            <p className="font-semibold">{product.name}</p>
-
-                            <p className="text-sm text-muted-foreground">
-                              {[product.brand, product.category, product.budget_band]
-                                .filter(Boolean)
-                                .join(" • ")}
-                            </p>
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => removeProduct(product.id)}
-                          className="rounded-xl border px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-10 rounded-3xl border bg-muted/40 p-6">
-                  <h2 className="text-xl font-semibold">
-                    No products selected yet
-                  </h2>
-
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    You can still submit a general inquiry, or go to the catalog
-                    and add products to inquiry first.
+          <div className="mt-12 grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
+            <section className="rounded-3xl border bg-card p-6">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold">Selected Products</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {products.length} product{products.length === 1 ? "" : "s"}{" "}
+                    selected · Total quantity {totalQuantity}
                   </p>
                 </div>
-              )}
 
-              <form className="mt-10 grid gap-4" onSubmit={handleSubmit}>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <input
-                    name="companyName"
-                    className="rounded-xl border bg-background p-4"
-                    placeholder="Company name"
-                    required
-                  />
-
-                  <input
-                    name="contactPerson"
-                    className="rounded-xl border bg-background p-4"
-                    placeholder="Contact person"
-                    required
-                  />
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <input
-                    name="email"
-                    className="rounded-xl border bg-background p-4"
-                    placeholder="Email"
-                    type="email"
-                    required
-                  />
-
-                  <input
-                    name="phone"
-                    className="rounded-xl border bg-background p-4"
-                    placeholder="Phone / WhatsApp number"
-                    required
-                  />
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <select
-                    name="budgetBand"
-                    className="rounded-xl border bg-background p-4"
-                    required
+                {products.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={clearInquiryList}
                   >
-                    <option value="">Select budget band</option>
-                    <option>Under ₹250</option>
-                    <option>₹250–₹500</option>
-                    <option>₹500–₹1000</option>
-                    <option>₹1000+</option>
-                  </select>
-
-                  <input
-                    name="quantity"
-                    className="rounded-xl border bg-background p-4"
-                    placeholder="Quantity e.g. 500"
-                    required
-                  />
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <input
-                    name="occasion"
-                    className="rounded-xl border bg-background p-4"
-                    placeholder="Occasion e.g. Diwali, onboarding"
-                  />
-
-                  <input
-                    name="deliveryCity"
-                    className="rounded-xl border bg-background p-4"
-                    placeholder="Delivery city"
-                  />
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <select
-                    name="brandingRequired"
-                    className="rounded-xl border bg-background p-4"
-                  >
-                    <option value="">Branding required?</option>
-                    <option>Yes</option>
-                    <option>No</option>
-                    <option>Not sure</option>
-                  </select>
-
-                  <input
-                    name="timeline"
-                    className="rounded-xl border bg-background p-4"
-                    placeholder="Timeline e.g. within 2 weeks"
-                  />
-                </div>
-
-                <textarea
-                  name="message"
-                  className="min-h-36 rounded-xl border bg-background p-4"
-                  placeholder="Message / requirements"
-                />
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-fit rounded-xl bg-black px-6 py-4 text-base font-semibold text-white transition hover:bg-black/90 disabled:opacity-60"
-                >
-                  {loading ? "Sending..." : "Submit Inquiry"}
-                </button>
-
-                {submitted && (
-                  <div className="rounded-2xl border bg-secondary p-5">
-                    <p className="font-semibold">Inquiry sent successfully ✅</p>
-
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      You will receive this inquiry on your email.
-                    </p>
-                  </div>
+                    Clear All
+                  </Button>
                 )}
+              </div>
+
+              {products.length > 0 ? (
+                <div className="mt-6 space-y-4">
+                  {products.map((product) => (
+                    <div
+                      key={product.id}
+                      className="grid gap-4 rounded-2xl border bg-background p-4 sm:grid-cols-[110px_1fr]"
+                    >
+                      <div className="relative h-28 overflow-hidden rounded-xl bg-white">
+                        {product.image_url ? (
+                          <Image
+                            src={product.image_url}
+                            alt={product.name}
+                            fill
+                            sizes="110px"
+                            className="object-contain p-2"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                            No image
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex flex-col gap-4">
+                        <div>
+                          <p className="text-sm font-medium text-muted-foreground">
+                            {product.brand || "white-c"} ·{" "}
+                            {product.category || "Corporate Gift"}
+                          </p>
+
+                          <h3 className="mt-1 text-xl font-semibold">
+                            {product.name}
+                          </h3>
+
+                          {product.budget_band && (
+                            <p className="mt-2 text-sm text-muted-foreground">
+                              Budget band: {product.budget_band}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-3">
+                          <label className="text-sm font-semibold">
+                            Quantity
+                          </label>
+
+                          <div className="flex items-center overflow-hidden rounded-xl border">
+                            <button
+                              type="button"
+                              onClick={() => decreaseQuantity(product.id)}
+                              className="h-10 w-10 border-r text-lg font-semibold hover:bg-muted"
+                            >
+                              −
+                            </button>
+
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={
+                                quantityInputs[product.id] ??
+                                String(product.quantity || 1)
+                              }
+                              onChange={(event) =>
+                                handleQuantityTyping(
+                                  product.id,
+                                  event.target.value
+                                )
+                              }
+                              onBlur={() => handleQuantityBlur(product.id)}
+                              className="h-10 w-20 bg-background px-3 text-center text-sm outline-none"
+                            />
+
+                            <button
+                              type="button"
+                              onClick={() => increaseQuantity(product.id)}
+                              className="h-10 w-10 border-l text-lg font-semibold hover:bg-muted"
+                            >
+                              +
+                            </button>
+                          </div>
+
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => removeProduct(product.id)}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-6 rounded-2xl border bg-muted p-8 text-center">
+                  <h3 className="text-xl font-semibold">
+                    No products selected yet
+                  </h3>
+
+                  <p className="mt-2 text-muted-foreground">
+                    Browse the catalog and add products to your inquiry list.
+                  </p>
+
+                  <Link href="/catalog">
+                    <Button className="mt-6">Browse Catalog</Button>
+                  </Link>
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-3xl border bg-card p-6">
+              <h2 className="text-2xl font-bold">Your Details</h2>
+
+              <form onSubmit={submitInquiry} className="mt-6 space-y-5">
+                <div>
+                  <label className="text-sm font-semibold">Name *</label>
+                  <input
+                    type="text"
+                    value={form.name}
+                    onChange={(event) => updateForm("name", event.target.value)}
+                    placeholder="Your name"
+                    className="mt-2 h-12 w-full rounded-xl border bg-background px-4 outline-none focus:ring-2 focus:ring-foreground/20"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-semibold">Company Name</label>
+                  <input
+                    type="text"
+                    value={form.company}
+                    onChange={(event) =>
+                      updateForm("company", event.target.value)
+                    }
+                    placeholder="Company name"
+                    className="mt-2 h-12 w-full rounded-xl border bg-background px-4 outline-none focus:ring-2 focus:ring-foreground/20"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-semibold">Email *</label>
+                  <input
+                    type="email"
+                    value={form.email}
+                    onChange={(event) =>
+                      updateForm("email", event.target.value)
+                    }
+                    placeholder="email@company.com"
+                    className="mt-2 h-12 w-full rounded-xl border bg-background px-4 outline-none focus:ring-2 focus:ring-foreground/20"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-semibold">Phone *</label>
+                  <input
+                    type="tel"
+                    value={form.phone}
+                    onChange={(event) =>
+                      updateForm("phone", event.target.value)
+                    }
+                    placeholder="Phone number"
+                    className="mt-2 h-12 w-full rounded-xl border bg-background px-4 outline-none focus:ring-2 focus:ring-foreground/20"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-sm font-semibold">
+                    Requirement / Notes
+                  </label>
+                  <textarea
+                    value={form.requirement}
+                    onChange={(event) =>
+                      updateForm("requirement", event.target.value)
+                    }
+                    placeholder="Mention event, delivery city, timeline, branding requirement, budget, or any specific preference."
+                    rows={5}
+                    className="mt-2 w-full rounded-xl border bg-background px-4 py-3 outline-none focus:ring-2 focus:ring-foreground/20"
+                  />
+                </div>
 
                 {error && (
-                  <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-700">
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
                     {error}
                   </div>
                 )}
-              </form>
-            </div>
 
-            <aside className="rounded-3xl border bg-card p-8 shadow-sm">
-              <h2 className="text-2xl font-semibold">
-                What happens after you submit?
-              </h2>
-
-              <div className="mt-6 space-y-5">
-                {[
-                  "white-c reviews your requirement.",
-                  "Curated product options are shortlisted.",
-                  "Logo branding and packaging options are checked.",
-                  "Bulk quote is prepared based on quantity and timeline.",
-                  "Final options are shared for approval.",
-                ].map((item, index) => (
-                  <div key={item} className="flex gap-4">
-                    <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-semibold">
-                      {index + 1}
-                    </div>
-
-                    <p className="text-muted-foreground">{item}</p>
+                {message && (
+                  <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-700">
+                    {message}
                   </div>
-                ))}
-              </div>
+                )}
 
-              <div className="mt-8 rounded-2xl bg-muted p-5">
-                <p className="font-medium">No online payment required.</p>
+                <Button
+                  type="submit"
+                  disabled={isSending || products.length === 0}
+                  className="h-12 w-full rounded-xl text-base font-semibold"
+                >
+                  {isSending ? "Sending Inquiry..." : "Send Inquiry"}
+                </Button>
 
-                <p className="mt-2 text-sm text-muted-foreground">
-                  This is an inquiry-first B2B journey. Pricing is shared
-                  privately after requirement review.
+                <p className="text-xs leading-5 text-muted-foreground">
+                  We do not show public pricing because final pricing depends on
+                  quantity, branding, packaging, and delivery requirements.
                 </p>
-              </div>
-            </aside>
+              </form>
+            </section>
           </div>
-        </section>
+        </div>
       </main>
 
       <Footer />

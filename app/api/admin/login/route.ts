@@ -1,51 +1,113 @@
 import { cookies } from "next/headers"
+import crypto from "crypto"
+import bcrypt from "bcryptjs"
+import { supabaseAdmin } from "@/lib/supabase-admin"
+import { ADMIN_SESSION_COOKIE } from "@/lib/admin-auth"
+
+export const runtime = "nodejs"
 
 export async function POST(request: Request) {
   try {
-    const { password } = await request.json()
+    const { email, password } = await request.json()
 
-    const adminPassword = process.env.ADMIN_PASSWORD
-    const sessionSecret = process.env.ADMIN_SESSION_SECRET
-
-    if (!adminPassword || !sessionSecret) {
+    if (!email || !password) {
       return Response.json(
         {
           success: false,
-          message: "Admin environment variables are missing.",
+          message: "Email and password are required.",
         },
-        { status: 500 }
+        { status: 400 }
       )
     }
 
-    if (password !== adminPassword) {
+    const { data: user, error } = await supabaseAdmin
+      .from("admin_users")
+      .select("*")
+      .eq("email", String(email).toLowerCase().trim())
+      .eq("is_active", true)
+      .single()
+
+    if (error || !user) {
       return Response.json(
         {
           success: false,
-          message: "Incorrect admin password.",
+          message: "Invalid email or password.",
         },
         { status: 401 }
       )
     }
 
+    if (!user.password_hash) {
+      return Response.json(
+        {
+          success: false,
+          message:
+            "Password is not set for this user yet. Ask the owner to set it.",
+        },
+        { status: 401 }
+      )
+    }
+
+    const passwordMatches = await bcrypt.compare(password, user.password_hash)
+
+    if (!passwordMatches) {
+      return Response.json(
+        {
+          success: false,
+          message: "Invalid email or password.",
+        },
+        { status: 401 }
+      )
+    }
+
+    const sessionToken = crypto.randomBytes(32).toString("hex")
+    const expiresAt = new Date()
+    expiresAt.setDate(expiresAt.getDate() + 7)
+
+    const { error: sessionError } = await supabaseAdmin
+      .from("admin_sessions")
+      .insert({
+        user_id: user.id,
+        session_token: sessionToken,
+        expires_at: expiresAt.toISOString(),
+      })
+
+    if (sessionError) {
+      return Response.json(
+        {
+          success: false,
+          message: sessionError.message,
+        },
+        { status: 500 }
+      )
+    }
+
     const cookieStore = await cookies()
 
-    cookieStore.set("whitec_admin_session", sessionSecret, {
+    cookieStore.set(ADMIN_SESSION_COOKIE, sessionToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
       path: "/",
-      maxAge: 60 * 60 * 24 * 7,
+      expires: expiresAt,
     })
 
     return Response.json({
       success: true,
-      message: "Logged in successfully.",
+      user: {
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        roles: user.roles,
+      },
     })
-  } catch {
+  } catch (error: any) {
+    console.error("Admin login error:", error)
+
     return Response.json(
       {
         success: false,
-        message: "Something went wrong.",
+        message: error?.message || "Something went wrong during login.",
       },
       { status: 500 }
     )

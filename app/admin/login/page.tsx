@@ -1,32 +1,22 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { Navbar } from "@/components/navbar"
-import { Footer } from "@/components/footer"
+import { Button } from "@/components/ui/button"
 
 export default function AdminLoginPage() {
   const router = useRouter()
 
+  const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-  const [nextUrl, setNextUrl] = useState("/admin/products")
-  const [loading, setLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const next = params.get("next")
-
-    if (next && next.startsWith("/admin")) {
-      setNextUrl(next)
-    }
-  }, [])
-
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleLogin(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
-    setLoading(true)
     setError("")
+    setIsLoading(true)
 
     try {
       const response = await fetch("/api/admin/login", {
@@ -34,69 +24,78 @@ export default function AdminLoginPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({
+          email,
+          password,
+        }),
       })
 
       const result = await response.json()
 
-      if (!result.success) {
-        setError(result.message || "Invalid password")
-        return
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Login failed.")
       }
 
-      router.push(nextUrl)
+      router.push("/admin/workflow")
       router.refresh()
-    } catch {
-      setError("Something went wrong. Please try again.")
+    } catch (loginError: any) {
+      setError(loginError?.message || "Login failed.")
     } finally {
-      setLoading(false)
+      setIsLoading(false)
     }
   }
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <Navbar />
+    <main className="flex min-h-screen items-center justify-center bg-muted px-6 py-12">
+      <div className="w-full max-w-md rounded-3xl border bg-background p-8 shadow-sm">
+        <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          white-c Admin
+        </p>
 
-      <main className="flex flex-1 items-center justify-center px-6 py-20">
-        <div className="w-full max-w-md rounded-3xl border bg-card p-8 shadow-sm">
-          <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Admin Access
-          </p>
+        <h1 className="mt-3 text-3xl font-bold">Team Login</h1>
 
-          <h1 className="mt-2 text-3xl font-bold">Login to Admin</h1>
+        <p className="mt-3 text-sm leading-6 text-muted-foreground">
+          Sign in to manage enquiries, orders, tasks, products, and reminders.
+        </p>
 
-          <p className="mt-3 text-sm text-muted-foreground">
-            Enter the admin password to manage products and imports.
-          </p>
+        <form onSubmit={handleLogin} className="mt-8 space-y-5">
+          <div>
+            <label className="text-sm font-semibold">Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@white-c.in"
+              className="mt-2 h-12 w-full rounded-xl border bg-background px-4 outline-none focus:ring-2 focus:ring-foreground/20"
+            />
+          </div>
 
-          <form className="mt-8 grid gap-4" onSubmit={handleSubmit}>
+          <div>
+            <label className="text-sm font-semibold">Password</label>
             <input
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              className="rounded-xl border bg-background p-4"
-              placeholder="Admin password"
-              required
+              placeholder="Password"
+              className="mt-2 h-12 w-full rounded-xl border bg-background px-4 outline-none focus:ring-2 focus:ring-foreground/20"
             />
+          </div>
 
-            {error && (
-              <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-                {error}
-              </div>
-            )}
+          {error && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+              {error}
+            </div>
+          )}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="rounded-xl bg-black px-6 py-4 font-semibold text-white transition hover:bg-black/90 disabled:opacity-60"
-            >
-              {loading ? "Logging in..." : "Login"}
-            </button>
-          </form>
-        </div>
-      </main>
-
-      <Footer />
-    </div>
+          <Button
+            type="submit"
+            disabled={isLoading}
+            className="h-12 w-full rounded-xl text-base font-semibold"
+          >
+            {isLoading ? "Signing in..." : "Sign In"}
+          </Button>
+        </form>
+      </div>
+    </main>
   )
 }
