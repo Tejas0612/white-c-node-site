@@ -1,4 +1,7 @@
-import { WorkflowSidebar } from "@/components/admin/workflow-sidebar"
+import {
+  AdminMobileNav,
+  WorkflowSidebar,
+} from "@/components/admin/workflow-sidebar"
 import { requireAdminUser } from "@/lib/admin-auth"
 
 export async function AdminShell({
@@ -15,7 +18,7 @@ export async function AdminShell({
       <WorkflowSidebar user={user} />
 
       <main className="min-w-0 flex-1 overflow-hidden">
-        <header className="flex items-center justify-between border-b bg-background px-6 py-4">
+        <header className="flex items-center justify-between border-b bg-background px-4 py-4 sm:px-6">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Logged in as
@@ -25,15 +28,17 @@ export async function AdminShell({
 
           <form action="/api/admin/logout" method="post">
             <button
-                type="submit"
-                className="rounded-xl border px-4 py-2 text-sm font-semibold hover:bg-muted"
+              type="submit"
+              className="rounded-xl border px-4 py-2 text-sm font-semibold hover:bg-muted"
             >
-                Logout
+              Logout
             </button>
-            </form>
+          </form>
         </header>
 
-        <div className="min-w-0 p-6">{children}</div>
+        <AdminMobileNav />
+
+        <div className="min-w-0 p-4 sm:p-6">{children}</div>
       </main>
     </div>
   )

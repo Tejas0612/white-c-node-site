@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation"
 
-export default function AdminPage() {
-  redirect("/admin/products")
+export default function AdminIndexPage() {
+  redirect("/admin/workflow")
 }

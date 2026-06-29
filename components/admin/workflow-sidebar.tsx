@@ -50,7 +50,7 @@ export function WorkflowSidebar({ user }: { user: SidebarUser }) {
       <div className="border-t p-3">
         <Link
           href="/"
-          className="mb-3 block rounded-xl border px-3 py-2.5 text-sm font-semibold text-center hover:bg-muted"
+          className="mb-3 block rounded-xl border px-3 py-2.5 text-center text-sm font-semibold hover:bg-muted"
         >
           View Website
         </Link>
@@ -60,5 +60,40 @@ export function WorkflowSidebar({ user }: { user: SidebarUser }) {
         </p>
       </div>
     </aside>
+  )
+}
+
+export function AdminMobileNav() {
+  return (
+    <div className="border-b bg-background px-4 py-3 lg:hidden">
+      <div className="mb-3 flex items-center justify-between gap-4">
+        <Link href="/admin/workflow" className="flex items-center">
+          <img
+            src="/brand/whitec-logo-dark.png"
+            alt="White C"
+            className="h-12 w-auto max-w-[130px] object-contain"
+          />
+        </Link>
+
+        <Link
+          href="/"
+          className="rounded-xl border px-3 py-2 text-xs font-semibold hover:bg-muted"
+        >
+          View Website
+        </Link>
+      </div>
+
+      <nav className="flex gap-2 overflow-x-auto pb-1">
+        {navItems.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            className="shrink-0 rounded-full border px-4 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            {item.label}
+          </Link>
+        ))}
+      </nav>
+    </div>
   )
 }
