@@ -1,44 +1,8 @@
 import { supabaseAdmin } from "@/lib/supabase-admin"
 import { AssignTaskModal } from "./assign-task-modal"
-import { TaskActions } from "./task-actions"
+import { SendAllTaskRemindersButton, TaskActions } from "./task-actions"
 
 export const dynamic = "force-dynamic"
-
-function cleanPhone(phone: string | null | undefined) {
-  return String(phone || "").replace(/\D/g, "")
-}
-
-function createWhatsAppUrl(phone: string | null | undefined, message: string) {
-  const cleanedPhone = cleanPhone(phone)
-
-  if (!cleanedPhone) return "#"
-
-  return `https://web.whatsapp.com/send?phone=${cleanedPhone}&text=${encodeURIComponent(
-    message
-  )}`
-}
-
-function createTaskReminderMessage(task: any) {
-  const assigneeName = task.workflow_team_members?.name || "there"
-
-  return `Hi ${assigneeName}, reminder for your pending White C task:
-
-Task Code: ${task.task_code}
-Task: ${task.title}
-${task.description ? `Details: ${task.description}` : ""}
-${task.due_date ? `Due date: ${task.due_date}` : ""}
-
-Please reply in this format:
-
-DONE ${task.task_code}
-
-or
-
-REMARK ${task.task_code} your update here
-
-Example:
-REMARK ${task.task_code} Vendor confirmed dispatch tomorrow.`
-}
 
 export default async function WorkflowTasksPage() {
   const { data: tasks, error } = await supabaseAdmin
@@ -68,20 +32,6 @@ export default async function WorkflowTasksPage() {
   const doneTasks = allTasks.filter((task) => task.status === "Done")
   const remarkedTasks = allTasks.filter((task) => task.status === "Remarked")
 
-  const reminderMessages = pendingTasks
-    .filter((task) => task.workflow_team_members?.whatsapp)
-    .map((task) => `${task.workflow_team_members.name}: ${task.task_code} - ${task.title}`)
-    .join("\n")
-
-  const adminReminderMessage = `White C pending task reminders:
-
-${reminderMessages || "No pending tasks with WhatsApp numbers."}
-
-Ask team members to reply:
-DONE TASK_CODE
-or
-REMARK TASK_CODE update text`
-
   return (
     <div>
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -91,18 +41,12 @@ REMARK TASK_CODE update text`
           </p>
           <h1 className="mt-2 text-4xl font-bold tracking-tight">Tasks</h1>
           <p className="mt-2 text-muted-foreground">
-            Assign tasks, track follow-ups, and send WhatsApp reminders.
+            Assign tasks, track follow-ups, and send WhatsApp reminders from the
+            connected White C sender number.
           </p>
         </div>
 
-        <a
-          href={createWhatsAppUrl("+918282970221", adminReminderMessage)}
-          target="_blank"
-          rel="noreferrer"
-          className="rounded-xl border bg-background px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-50"
-        >
-          Send reminders now
-        </a>
+        <SendAllTaskRemindersButton />
       </div>
 
       {error && (
@@ -145,7 +89,7 @@ REMARK TASK_CODE update text`
           <div>
             <h2 className="text-xl font-bold">Task List</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Track operations, follow-ups, and delivery responsibilities.
+              Send reminders, update task status, and capture remarks.
             </p>
           </div>
 
@@ -167,71 +111,58 @@ REMARK TASK_CODE update text`
             </thead>
 
             <tbody>
-              {allTasks.map((task) => {
-                const message = createTaskReminderMessage(task)
-                const whatsappUrl = createWhatsAppUrl(
-                  task.workflow_team_members?.whatsapp,
-                  message
-                )
+              {allTasks.map((task) => (
+                <tr key={task.id} className="border-b">
+                  <td className="px-5 py-4 font-mono text-xs text-muted-foreground">
+                    {task.task_code}
+                  </td>
 
-                return (
-                  <tr key={task.id} className="border-b">
-                    <td className="px-5 py-4 font-mono text-xs text-muted-foreground">
-                      {task.task_code}
-                    </td>
-
-                    <td className="px-5 py-4">
-                      <p className="font-semibold">{task.title}</p>
-                      {task.description && (
-                        <p className="mt-1 max-w-md truncate text-xs text-muted-foreground">
-                          {task.description}
-                        </p>
-                      )}
-                    </td>
-
-                    <td className="px-5 py-4">
-                      <p className="font-medium">
-                        {task.workflow_team_members?.name || "Unassigned"}
+                  <td className="px-5 py-4">
+                    <p className="font-semibold">{task.title}</p>
+                    {task.description && (
+                      <p className="mt-1 max-w-md truncate text-xs text-muted-foreground">
+                        {task.description}
                       </p>
+                    )}
+                  </td>
 
-                      {task.workflow_team_members?.whatsapp ? (
-                        <a
-                          href={whatsappUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mt-1 inline-block text-xs font-semibold text-green-600 hover:underline"
-                        >
-                          {task.workflow_team_members.whatsapp}
-                        </a>
-                      ) : (
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          No WhatsApp
-                        </p>
-                      )}
-                    </td>
+                  <td className="px-5 py-4">
+                    <p className="font-medium">
+                      {task.workflow_team_members?.name || "Unassigned"}
+                    </p>
 
-                    <td className="px-5 py-4">{task.due_date || "—"}</td>
+                    {task.workflow_team_members?.whatsapp ? (
+                      <p className="mt-1 text-xs font-semibold text-green-600">
+                        {task.workflow_team_members.whatsapp}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        No WhatsApp
+                      </p>
+                    )}
+                  </td>
 
-                    <td className="px-5 py-4">
-                      <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold">
-                        {task.status}
-                      </span>
-                    </td>
+                  <td className="px-5 py-4">{task.due_date || "—"}</td>
 
-                    <td className="px-5 py-4 text-muted-foreground">
-                      {task.remark || "—"}
-                    </td>
+                  <td className="px-5 py-4">
+                    <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold">
+                      {task.status}
+                    </span>
+                  </td>
 
-                    <td className="px-5 py-4 text-right">
-                      <TaskActions
-                        taskId={task.id}
-                        taskCode={task.task_code}
-                        currentStatus={task.status}
-                      />
-                    </td>
-                  </tr>
-                )
-              })}
+                  <td className="px-5 py-4 text-muted-foreground">
+                    {task.remark || "—"}
+                  </td>
+
+                  <td className="px-5 py-4 text-right">
+                    <TaskActions
+                      taskId={task.id}
+                      taskCode={task.task_code}
+                      currentStatus={task.status}
+                    />
+                  </td>
+                </tr>
+              ))}
 
               {allTasks.length === 0 && (
                 <tr>

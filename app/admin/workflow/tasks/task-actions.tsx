@@ -12,6 +12,60 @@ type TaskActionsProps = {
   currentStatus: string
 }
 
+export function SendAllTaskRemindersButton() {
+  const [message, setMessage] = useState("")
+  const [isPending, startTransition] = useTransition()
+
+  function handleSendAll() {
+    setMessage("")
+
+    startTransition(async () => {
+      try {
+        const response = await fetch("/api/whatsapp/send-task-reminder", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            mode: "pending",
+          }),
+        })
+
+        const result = await response.json()
+
+        if (!response.ok || !result.success) {
+          throw new Error(result.message || "Failed to send reminders.")
+        }
+
+        setMessage(
+          `Sent ${result.sent_count} reminder(s). Failed ${result.failed_count}.`
+        )
+      } catch (sendError: any) {
+        setMessage(sendError?.message || "Failed to send reminders.")
+      }
+    })
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <button
+        type="button"
+        onClick={handleSendAll}
+        disabled={isPending}
+        className="rounded-xl border bg-background px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-50 disabled:opacity-60"
+      >
+        {isPending ? "Sending..." : "Send reminders now"}
+      </button>
+
+      {message && (
+        <p className="max-w-xs text-right text-xs text-muted-foreground">
+          {message}
+        </p>
+      )}
+    </div>
+  )
+}
+
 export function TaskActions({
   taskId,
   taskCode,
@@ -23,10 +77,42 @@ export function TaskActions({
     currentStatus === "Done" ? "Done" : "Remarked"
   )
   const [error, setError] = useState("")
+  const [success, setSuccess] = useState("")
   const [isPending, startTransition] = useTransition()
+
+  function handleSendReminder() {
+    setError("")
+    setSuccess("")
+
+    startTransition(async () => {
+      try {
+        const response = await fetch("/api/whatsapp/send-task-reminder", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            mode: "single",
+            taskId,
+          }),
+        })
+
+        const result = await response.json()
+
+        if (!response.ok || !result.success) {
+          throw new Error(result.message || "Failed to send reminder.")
+        }
+
+        setSuccess("Reminder sent")
+      } catch (sendError: any) {
+        setError(sendError?.message || "Failed to send reminder.")
+      }
+    })
+  }
 
   function handleMarkDone() {
     setError("")
+    setSuccess("")
 
     startTransition(async () => {
       try {
@@ -39,6 +125,7 @@ export function TaskActions({
 
   function handleSaveRemark() {
     setError("")
+    setSuccess("")
 
     startTransition(async () => {
       try {
@@ -59,12 +146,21 @@ export function TaskActions({
   return (
     <>
       <div className="flex flex-wrap justify-end gap-2">
+        <button
+          type="button"
+          onClick={handleSendReminder}
+          disabled={isPending}
+          className="rounded-xl border px-3 py-2 text-xs font-semibold text-green-700 hover:bg-green-50 disabled:opacity-60"
+        >
+          Send Reminder
+        </button>
+
         {currentStatus !== "Done" && (
           <button
             type="button"
             onClick={handleMarkDone}
             disabled={isPending}
-            className="rounded-xl border px-3 py-2 text-xs font-semibold text-green-700 hover:bg-green-50 disabled:opacity-60"
+            className="rounded-xl border px-3 py-2 text-xs font-semibold hover:bg-muted disabled:opacity-60"
           >
             Mark Done
           </button>
@@ -78,6 +174,12 @@ export function TaskActions({
           Add Remark
         </button>
       </div>
+
+      {success && (
+        <p className="mt-2 text-right text-xs font-medium text-green-600">
+          {success}
+        </p>
+      )}
 
       {error && (
         <p className="mt-2 text-right text-xs font-medium text-red-600">
