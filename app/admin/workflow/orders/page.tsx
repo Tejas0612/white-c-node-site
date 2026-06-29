@@ -1,8 +1,12 @@
+import { requireAdminUser } from "@/lib/admin-auth"
 import { supabaseAdmin } from "@/lib/supabase-admin"
+import { isAdminOrOwner } from "@/lib/admin-role-utils"
 import { CreateOrderModal } from "./create-order-modal"
 import { OrderActions } from "./order-actions"
+import { EditOrderButton } from "./edit-order-button"
 
 export const dynamic = "force-dynamic"
+
 
 function formatCurrency(value: number | null) {
   return new Intl.NumberFormat("en-IN", {
@@ -21,6 +25,17 @@ function StatusPill({ label }: { label: string }) {
 }
 
 export default async function WorkflowOrdersPage() {
+
+  const user = await requireAdminUser([
+    "Admin",
+    "Owner",
+    "Operations",
+    "Sales",
+    "Accounts",
+    ])
+
+  const canEdit = isAdminOrOwner(user)
+  
   const { data: orders, error } = await supabaseAdmin
     .from("workflow_orders")
     .select("*")
@@ -157,11 +172,15 @@ export default async function WorkflowOrdersPage() {
                 </div>
 
                 <div className="flex justify-start xl:justify-end">
-                  <OrderActions
-                    orderId={order.id}
-                    orderCode={order.order_code}
-                    currentStatus={order.status || "New"}
-                  />
+                  <div className="ml-auto flex w-full max-w-[190px] flex-col items-end gap-2">
+                    <OrderActions
+                        orderId={order.id}
+                        orderCode={order.order_code}
+                        currentStatus={order.status || "New"}
+                    />
+
+                    {canEdit && <EditOrderButton order={order} />}
+                    </div>
                 </div>
               </div>
             </div>

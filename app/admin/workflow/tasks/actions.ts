@@ -100,3 +100,43 @@ export async function updateWorkflowTaskRemark({
   revalidatePath("/admin/workflow/tasks")
   revalidatePath("/admin/workflow")
 }
+
+export async function updateWorkflowTaskDetails(formData: FormData) {
+  await requireAdminUser(["Admin", "Owner"])
+
+  const taskId = String(formData.get("task_id") || "").trim()
+  const title = String(formData.get("title") || "").trim()
+  const description = String(formData.get("description") || "").trim()
+  const assigneeId = String(formData.get("assignee_id") || "").trim()
+  const dueDate = String(formData.get("due_date") || "").trim()
+  const status = String(formData.get("status") || "").trim()
+  const remark = String(formData.get("remark") || "").trim()
+
+  if (!taskId) {
+    throw new Error("Task ID is required.")
+  }
+
+  if (!title) {
+    throw new Error("Task title is required.")
+  }
+
+  const { error } = await supabaseAdmin
+    .from("workflow_tasks")
+    .update({
+      title,
+      description: description || null,
+      assignee_id: assigneeId || null,
+      due_date: dueDate || null,
+      status: status || "Open",
+      remark: remark || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", taskId)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  revalidatePath("/admin/workflow/tasks")
+  revalidatePath("/admin/workflow")
+}

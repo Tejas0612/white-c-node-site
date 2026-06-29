@@ -221,3 +221,62 @@ export async function updateWorkflowEnquiryRemark({
   revalidatePath("/admin/workflow/enquiries")
   revalidatePath("/admin/workflow")
 }
+
+
+export async function updateWorkflowEnquiryDetails(formData: FormData) {
+  await requireAdminUser(["Admin", "Owner"])
+
+  const enquiryId = String(formData.get("enquiry_id") || "").trim()
+  const clientName = String(formData.get("client_name") || "").trim()
+  const productNames = String(formData.get("product_names") || "").trim()
+  const tentativeQuantity = Number(formData.get("tentative_quantity") || 0)
+  const approxCost = Number(formData.get("approx_cost") || 0)
+  const clientPhone = String(formData.get("client_phone") || "").trim()
+  const clientEmail = String(formData.get("client_email") || "").trim()
+  const status = String(formData.get("status") || "").trim()
+  const remarks = String(formData.get("remarks") || "").trim()
+  const assignedTo = String(formData.get("assigned_to") || "").trim()
+  const successProbability = Number(formData.get("success_probability") || 0)
+  const proposalStatus = String(formData.get("proposal_status") || "").trim()
+  const clientResponseStatus = String(formData.get("client_response_status") || "").trim()
+  const poStatus = String(formData.get("po_status") || "").trim()
+  const convertedToOrder = String(formData.get("converted_to_order") || "false") === "true"
+  const nextFollowUpDate = String(formData.get("next_follow_up_date") || "").trim()
+
+  if (!enquiryId) {
+    throw new Error("Enquiry ID is required.")
+  }
+
+  if (!clientName) {
+    throw new Error("Client name is required.")
+  }
+
+  const { error } = await supabaseAdmin
+    .from("workflow_enquiries")
+    .update({
+      client_name: clientName,
+      product_names: productNames || null,
+      tentative_quantity: tentativeQuantity || null,
+      approx_cost: approxCost || null,
+      client_phone: clientPhone || null,
+      client_email: clientEmail || null,
+      status: status || "New",
+      remarks: remarks || null,
+      assigned_to: assignedTo || null,
+      success_probability: successProbability || null,
+      proposal_status: proposalStatus || null,
+      client_response_status: clientResponseStatus || null,
+      po_status: poStatus || null,
+      converted_to_order: convertedToOrder,
+      next_follow_up_date: nextFollowUpDate || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", enquiryId)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  revalidatePath("/admin/workflow/enquiries")
+  revalidatePath("/admin/workflow")
+}

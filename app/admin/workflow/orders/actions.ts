@@ -133,3 +133,57 @@ export async function updateWorkflowOrderRemark({
   revalidatePath("/admin/workflow/orders")
   revalidatePath("/admin/workflow")
 }
+
+
+export async function updateWorkflowOrderDetails(formData: FormData) {
+  await requireAdminUser(["Admin", "Owner"])
+
+  const orderId = String(formData.get("order_id") || "").trim()
+  const clientName = String(formData.get("client_name") || "").trim()
+  const productName = String(formData.get("product_name") || "").trim()
+  const quantity = Number(formData.get("quantity") || 1)
+  const salePrice = Number(formData.get("sale_price") || 0)
+  const orderDate = String(formData.get("order_date") || "").trim()
+  const poUrl = String(formData.get("po_url") || "").trim()
+  const status = String(formData.get("status") || "").trim()
+  const remarks = String(formData.get("remarks") || "").trim()
+
+  if (!orderId) {
+    throw new Error("Order ID is required.")
+  }
+
+  if (!clientName) {
+    throw new Error("Client name is required.")
+  }
+
+  if (!productName) {
+    throw new Error("Product name is required.")
+  }
+
+  const cleanQuantity = quantity > 0 ? quantity : 1
+  const cleanSalePrice = salePrice > 0 ? salePrice : 0
+  const orderValue = cleanQuantity * cleanSalePrice
+
+  const { error } = await supabaseAdmin
+    .from("workflow_orders")
+    .update({
+      client_name: clientName,
+      product_name: productName,
+      quantity: cleanQuantity,
+      sale_price: cleanSalePrice,
+      order_value: orderValue,
+      order_date: orderDate || null,
+      po_url: poUrl || null,
+      status: status || "New",
+      remarks: remarks || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orderId)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  revalidatePath("/admin/workflow/orders")
+  revalidatePath("/admin/workflow")
+}

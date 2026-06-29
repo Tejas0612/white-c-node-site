@@ -1,6 +1,9 @@
+import { requireAdminUser } from "@/lib/admin-auth"
 import { supabaseAdmin } from "@/lib/supabase-admin"
+import { isAdminOrOwner } from "@/lib/admin-role-utils"
 import { CreateEnquiryModal } from "./create-enquiry-modal"
 import { EnquiryActions } from "./enquiry-actions"
+import { EditEnquiryButton } from "./edit-enquiry-button"
 
 export const dynamic = "force-dynamic"
 
@@ -39,6 +42,16 @@ function SuccessBar({ value }: { value: number }) {
 }
 
 export default async function WorkflowEnquiriesPage() {
+
+  const user = await requireAdminUser([
+    "Admin",
+    "Owner",
+    "Sales",
+    "Operations",
+    ])
+
+  const canEdit = isAdminOrOwner(user)
+
   const { data: enquiries, error } = await supabaseAdmin
     .from("workflow_enquiries")
     .select(
@@ -206,19 +219,28 @@ export default async function WorkflowEnquiriesPage() {
                 </div>
 
                 <div className="flex justify-start xl:justify-end">
-                  <EnquiryActions
-                    enquiryId={enquiry.id}
-                    enquiryCode={enquiry.enquiry_code}
-                    currentStatus={enquiry.status || "New"}
-                    currentRemark={enquiry.remarks || ""}
-                    successProbability={enquiry.success_probability || 10}
-                    proposalStatus={enquiry.proposal_status || "Draft Needed"}
-                    clientResponseStatus={
-                      enquiry.client_response_status || "No Response Yet"
-                    }
-                    poStatus={enquiry.po_status || "Not Received"}
-                    hasPhone={Boolean(enquiry.client_phone)}
-                  />
+                  <div className="ml-auto flex w-full max-w-[190px] flex-col items-end gap-2">
+                    <EnquiryActions
+                        enquiryId={enquiry.id}
+                        enquiryCode={enquiry.enquiry_code}
+                        currentStatus={enquiry.status || "New"}
+                        currentRemark={enquiry.remarks || ""}
+                        successProbability={enquiry.success_probability || 10}
+                        proposalStatus={enquiry.proposal_status || "Draft Needed"}
+                        clientResponseStatus={
+                        enquiry.client_response_status || "No Response Yet"
+                        }
+                        poStatus={enquiry.po_status || "Not Received"}
+                        hasPhone={Boolean(enquiry.client_phone)}
+                    />
+
+                    {canEdit && (
+                        <EditEnquiryButton
+                        enquiry={enquiry}
+                        teamMembers={teamMembers || []}
+                        />
+                    )}
+                    </div>
                 </div>
               </div>
             </div>

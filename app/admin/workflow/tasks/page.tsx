@@ -1,6 +1,9 @@
+import { requireAdminUser } from "@/lib/admin-auth"
 import { supabaseAdmin } from "@/lib/supabase-admin"
+import { isAdminOrOwner } from "@/lib/admin-role-utils"
 import { AssignTaskModal } from "./assign-task-modal"
 import { TaskActions } from "./task-actions"
+import { EditTaskButton } from "./edit-task-button"
 
 export const dynamic = "force-dynamic"
 
@@ -13,6 +16,17 @@ function StatusPill({ label }: { label: string }) {
 }
 
 export default async function WorkflowTasksPage() {
+
+  const user = await requireAdminUser([
+    "Admin",
+    "Owner",
+    "Operations",
+    "Sales",
+    "Accounts",
+    ])
+
+  const canEdit = isAdminOrOwner(user)
+
   const { data: tasks, error } = await supabaseAdmin
     .from("workflow_tasks")
     .select(
@@ -158,11 +172,19 @@ export default async function WorkflowTasksPage() {
                 </div>
 
                 <div className="flex justify-start xl:justify-end">
-                  <TaskActions
-                    taskId={task.id}
-                    taskCode={task.task_code}
-                    currentStatus={task.status || "Pending"}
-                  />
+                  <div className="ml-auto flex w-full max-w-[250px] flex-col items-end gap-2">
+                    <TaskActions
+                        taskId={task.id}
+                        taskCode={task.task_code}
+                        currentStatus={task.status || "Pending"}
+                    />
+                    {canEdit && (
+                      <EditTaskButton
+                        task={task}
+                        teamMembers={teamMembers || []}
+                      />
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
