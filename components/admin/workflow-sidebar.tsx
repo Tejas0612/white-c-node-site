@@ -12,30 +12,30 @@ const navItems = [
   { label: "Orders", href: "/admin/workflow/orders" },
   { label: "Enquiries", href: "/admin/workflow/enquiries" },
   { label: "Tasks", href: "/admin/workflow/tasks" },
-  { label: "Stock Report", href: "/admin/workflow/stock-report" },
   { label: "Team", href: "/admin/workflow/team" },
+  { label: "Stock Report", href: "/admin/workflow/stock-report" },
   { label: "Catalog", href: "/admin/products" },
   { label: "Import Brochure", href: "/admin/brochure-import" },
 ]
 
 export function WorkflowSidebar({ user }: { user: SidebarUser }) {
   return (
-    <aside className="hidden min-h-screen w-52 shrink-0 border-r bg-background lg:block">
+    <aside className="hidden min-h-screen w-52 shrink-0 border-r bg-background lg:flex lg:flex-col">
       <div className="border-b px-4 py-5">
         <Link href="/admin/workflow" className="flex items-center">
           <img
             src="/brand/whitec-logo-dark.png"
             alt="White C"
-            className="h-14 w-auto max-w-[140px] object-contain"
+            className="h-20 w-auto max-w-[165px] object-contain"
           />
         </Link>
 
-        <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Admin Workflow
         </p>
       </div>
 
-      <nav className="space-y-1 p-3">
+      <nav className="flex-1 space-y-1 p-3">
         {navItems.map((item) => (
           <Link
             key={item.href}
@@ -47,7 +47,14 @@ export function WorkflowSidebar({ user }: { user: SidebarUser }) {
         ))}
       </nav>
 
-      <div className="mt-auto border-t p-4">
+      <div className="border-t p-3">
+        <Link
+          href="/"
+          className="mb-3 block rounded-xl border px-3 py-2.5 text-sm font-semibold text-center hover:bg-muted"
+        >
+          View Website
+        </Link>
+
         <p className="truncate text-xs font-semibold text-muted-foreground">
           {user.email}
         </p>

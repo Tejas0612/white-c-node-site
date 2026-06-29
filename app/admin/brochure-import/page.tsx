@@ -1,8 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { Navbar } from "@/components/navbar"
-import { Footer } from "@/components/footer"
 
 type ExtractedProduct = {
   brand: string
@@ -135,7 +133,7 @@ export default function BrochureImportPage() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <Navbar />
+
 
       <main className="flex-1 px-6 py-16">
         <div className="mx-auto max-w-7xl">
@@ -373,7 +371,6 @@ export default function BrochureImportPage() {
         </div>
       </main>
 
-      <Footer />
     </div>
   )
 }

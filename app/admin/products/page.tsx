@@ -1,7 +1,5 @@
 import Link from "next/link"
 import { supabase } from "@/lib/supabase"
-import { Navbar } from "@/components/navbar"
-import { Footer } from "@/components/footer"
 import { DeleteProductButton } from "@/components/admin/delete-product-button"
 
 export const dynamic = "force-dynamic"
@@ -14,7 +12,6 @@ export default async function AdminProductsPage() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <Navbar />
 
       <main className="flex-1 px-6 py-16">
         <div className="mx-auto max-w-7xl">
@@ -107,7 +104,6 @@ export default async function AdminProductsPage() {
         </div>
       </main>
 
-      <Footer />
     </div>
   )
 }

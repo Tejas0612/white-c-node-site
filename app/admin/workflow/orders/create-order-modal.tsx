@@ -83,7 +83,7 @@ export function CreateOrderModal() {
                 />
               </div>
 
-              <div className="grid gap-5 md:grid-cols-3">
+              <div className="grid gap-5 md:grid-cols-2">
                 <div>
                   <label className="text-sm font-semibold">Quantity</label>
                   <input
@@ -104,17 +104,9 @@ export function CreateOrderModal() {
                     defaultValue="0"
                     className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
                   />
-                </div>
-
-                <div>
-                  <label className="text-sm font-semibold">Order Value</label>
-                  <input
-                    type="number"
-                    name="order_value"
-                    min="0"
-                    defaultValue="0"
-                    className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
-                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Order value will be calculated automatically.
+                  </p>
                 </div>
               </div>
 
