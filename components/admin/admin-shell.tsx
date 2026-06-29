@@ -3,6 +3,7 @@ import {
   WorkflowSidebar,
 } from "@/components/admin/workflow-sidebar"
 import { requireAdminUser } from "@/lib/admin-auth"
+import { supabaseAdmin } from "@/lib/supabase-admin"
 
 export async function AdminShell({
   children,
@@ -13,9 +14,14 @@ export async function AdminShell({
 }) {
   const user = await requireAdminUser(allowedRoles)
 
+  const { data: accessRows } = await supabaseAdmin
+    .from("admin_role_access_matrix")
+    .select("page_key, allowed_roles, is_visible")
+    .order("display_order", { ascending: true })
+
   return (
     <div className="flex min-h-screen overflow-x-hidden bg-muted/30">
-      <WorkflowSidebar user={user} />
+      <WorkflowSidebar user={user} accessRows={accessRows || []} />
 
       <main className="min-w-0 flex-1 overflow-hidden">
         <header className="flex items-center justify-between border-b bg-background px-4 py-4 sm:px-6">
@@ -36,7 +42,7 @@ export async function AdminShell({
           </form>
         </header>
 
-        <AdminMobileNav />
+        <AdminMobileNav user={user} accessRows={accessRows || []} />
 
         <div className="min-w-0 p-4 sm:p-6">{children}</div>
       </main>

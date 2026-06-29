@@ -7,18 +7,150 @@ type SidebarUser = {
   roles?: string[] | null
 }
 
-const navItems = [
-  { label: "Dashboard", href: "/admin/workflow" },
-  { label: "Orders", href: "/admin/workflow/orders" },
-  { label: "Enquiries", href: "/admin/workflow/enquiries" },
-  { label: "Tasks", href: "/admin/workflow/tasks" },
-  { label: "Team", href: "/admin/workflow/team" },
-  { label: "Stock Report", href: "/admin/workflow/stock-report" },
-  { label: "Catalog", href: "/admin/products" },
-  { label: "Import Brochure", href: "/admin/brochure-import" },
+type RoleAccessRow = {
+  page_key: string
+  allowed_roles: string[]
+  is_visible: boolean
+}
+
+type NavItem = {
+  pageKey: string
+  label: string
+  href: string
+  fallbackRoles: string[]
+}
+
+const navItems: NavItem[] = [
+  {
+    pageKey: "dashboard",
+    label: "Dashboard",
+    href: "/admin/workflow",
+    fallbackRoles: [
+      "Admin",
+      "Operations",
+      "Sales",
+      "Accounts",
+      "Catalog",
+      "Viewer",
+      "Employee",
+    ],
+  },
+  {
+    pageKey: "orders",
+    label: "Orders",
+    href: "/admin/workflow/orders",
+    fallbackRoles: ["Admin", "Operations", "Sales", "Accounts"],
+  },
+  {
+    pageKey: "enquiries",
+    label: "Enquiries",
+    href: "/admin/workflow/enquiries",
+    fallbackRoles: ["Admin", "Sales", "Operations"],
+  },
+  {
+    pageKey: "tasks",
+    label: "Tasks",
+    href: "/admin/workflow/tasks",
+    fallbackRoles: ["Admin", "Operations", "Sales", "Accounts"],
+  },
+  {
+    pageKey: "team",
+    label: "Team",
+    href: "/admin/workflow/team",
+    fallbackRoles: ["Admin"],
+  },
+  {
+    pageKey: "stock_report",
+    label: "Stock Report",
+    href: "/admin/workflow/stock-report",
+    fallbackRoles: ["Admin", "Operations", "Accounts", "Catalog"],
+  },
+  {
+    pageKey: "catalog",
+    label: "Catalog",
+    href: "/admin/products",
+    fallbackRoles: ["Admin", "Catalog"],
+  },
+  {
+    pageKey: "brochure_import",
+    label: "Import Brochure",
+    href: "/admin/brochure-import",
+    fallbackRoles: ["Admin", "Catalog"],
+  },
 ]
 
-export function WorkflowSidebar({ user }: { user: SidebarUser }) {
+function getUserRoles(user: SidebarUser) {
+  const roles = new Set<string>()
+
+  if (user.role) {
+    roles.add(user.role)
+  }
+
+  if (Array.isArray(user.roles)) {
+    user.roles.forEach((role) => {
+      if (role) {
+        roles.add(role)
+      }
+    })
+  }
+
+  return roles
+}
+
+function canSeeNavItem({
+  user,
+  item,
+  accessRows,
+}: {
+  user: SidebarUser
+  item: NavItem
+  accessRows?: RoleAccessRow[]
+}) {
+  const userRoles = getUserRoles(user)
+
+  if (userRoles.has("Admin") || userRoles.has("Owner")) {
+    return true
+  }
+
+  const matrixRow = accessRows?.find((row) => row.page_key === item.pageKey)
+
+  if (matrixRow && matrixRow.is_visible === false) {
+    return false
+  }
+
+  const allowedRoles =
+    matrixRow && Array.isArray(matrixRow.allowed_roles)
+      ? matrixRow.allowed_roles
+      : item.fallbackRoles
+
+  return allowedRoles.some((role) => userRoles.has(role))
+}
+
+function getVisibleNavItems({
+  user,
+  accessRows,
+}: {
+  user: SidebarUser
+  accessRows?: RoleAccessRow[]
+}) {
+  return navItems.filter((item) =>
+    canSeeNavItem({
+      user,
+      item,
+      accessRows,
+    })
+  )
+}
+
+export function WorkflowSidebar({
+  user,
+  accessRows,
+}: {
+  user: SidebarUser
+  accessRows?: RoleAccessRow[]
+}) {
+  const visibleNavItems = getVisibleNavItems({ user, accessRows })
+
   return (
     <aside className="hidden min-h-screen w-52 shrink-0 border-r bg-background lg:flex lg:flex-col">
       <div className="border-b px-4 py-5">
@@ -36,7 +168,7 @@ export function WorkflowSidebar({ user }: { user: SidebarUser }) {
       </div>
 
       <nav className="flex-1 space-y-1 p-3">
-        {navItems.map((item) => (
+        {visibleNavItems.map((item) => (
           <Link
             key={item.href}
             href={item.href}
@@ -63,7 +195,15 @@ export function WorkflowSidebar({ user }: { user: SidebarUser }) {
   )
 }
 
-export function AdminMobileNav() {
+export function AdminMobileNav({
+  user,
+  accessRows,
+}: {
+  user: SidebarUser
+  accessRows?: RoleAccessRow[]
+}) {
+  const visibleNavItems = getVisibleNavItems({ user, accessRows })
+
   return (
     <div className="border-b bg-background px-4 py-3 lg:hidden">
       <div className="mb-3 flex items-center justify-between gap-4">
@@ -84,7 +224,7 @@ export function AdminMobileNav() {
       </div>
 
       <nav className="flex gap-2 overflow-x-auto pb-1">
-        {navItems.map((item) => (
+        {visibleNavItems.map((item) => (
           <Link
             key={item.href}
             href={item.href}

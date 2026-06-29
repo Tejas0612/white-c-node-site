@@ -4,8 +4,19 @@ import {
   AddTeamMemberButton,
   EditTeamMemberButton,
 } from "./team-member-actions"
+import { EditRoleAccessButton } from "./role-access-actions"
 
 export const dynamic = "force-dynamic"
+
+const roleColumns = [
+  "Admin",
+  "Operations",
+  "Sales",
+  "Accounts",
+  "Catalog",
+  "Viewer",
+  "Employee",
+]
 
 function StatusPill({ isActive }: { isActive: boolean }) {
   if (isActive) {
@@ -31,8 +42,16 @@ function RolePill({ role }: { role: string }) {
   )
 }
 
+function AccessMark({ allowed }: { allowed: boolean }) {
+  if (allowed) {
+    return <span className="text-lg font-bold text-green-600">✓</span>
+  }
+
+  return <span className="text-lg font-bold text-muted-foreground">—</span>
+}
+
 function getMemberRoles(member: any) {
-  if (member.roles && member.roles.length > 0) {
+  if (Array.isArray(member.roles) && member.roles.length > 0) {
     return member.roles
   }
 
@@ -46,12 +65,19 @@ function getMemberRoles(member: any) {
 export default async function WorkflowTeamPage() {
   await requireAdminUser(["Admin"])
 
-  const { data: teamMembers, error } = await supabaseAdmin
+  const { data: teamMembers, error: teamError } = await supabaseAdmin
     .from("workflow_team_members")
     .select("*")
     .order("created_at", { ascending: true })
 
+  const { data: roleAccessRows, error: roleAccessError } = await supabaseAdmin
+    .from("admin_role_access_matrix")
+    .select("*")
+    .order("display_order", { ascending: true })
+
   const allTeamMembers = teamMembers || []
+  const allRoleAccessRows = roleAccessRows || []
+
   const activeCount = allTeamMembers.filter((member) => member.is_active).length
   const inactiveCount = allTeamMembers.filter((member) => !member.is_active).length
 
@@ -64,16 +90,23 @@ export default async function WorkflowTeamPage() {
           </p>
           <h1 className="mt-2 text-4xl font-bold tracking-tight">Team</h1>
           <p className="mt-2 text-muted-foreground">
-            Manage team members, contact numbers, active status, and workflow roles.
+            Manage team members, contact numbers, active status, workflow roles,
+            and admin page access.
           </p>
         </div>
 
         <AddTeamMemberButton />
       </div>
 
-      {error && (
+      {teamError && (
         <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-5 text-red-700">
-          {error.message}
+          {teamError.message}
+        </div>
+      )}
+
+      {roleAccessError && (
+        <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-5 text-red-700">
+          Role access matrix error: {roleAccessError.message}
         </div>
       )}
 
@@ -113,7 +146,7 @@ export default async function WorkflowTeamPage() {
         </div>
 
         <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-          {allTeamMembers.map((member) => {
+          {allTeamMembers.map((member: any) => {
             const roles = getMemberRoles(member)
 
             return (
@@ -185,6 +218,92 @@ export default async function WorkflowTeamPage() {
               No team members found.
             </div>
           )}
+        </div>
+      </section>
+
+      <section className="mt-8 rounded-2xl border bg-background">
+        <div className="border-b p-5">
+          <h2 className="text-xl font-bold">Role Access Matrix</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Admin can edit which roles can see each admin page and what actions
+            they are allowed to perform.
+          </p>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1050px] text-left text-sm">
+            <thead>
+              <tr className="border-b bg-muted/40">
+                <th className="p-4 font-semibold">Page</th>
+                <th className="p-4 font-semibold">Allowed Actions</th>
+
+                {roleColumns.map((role) => (
+                  <th key={role} className="p-4 text-center font-semibold">
+                    {role}
+                  </th>
+                ))}
+
+                <th className="p-4 text-right font-semibold">Edit</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {allRoleAccessRows.map((row: any) => {
+                const allowedRoles = Array.isArray(row.allowed_roles)
+                  ? row.allowed_roles
+                  : []
+
+                return (
+                  <tr key={row.id} className="border-b last:border-b-0">
+                    <td className="p-4 align-top">
+                      <p className="font-semibold">{row.page_label}</p>
+                      {!row.is_visible && (
+                        <p className="mt-1 text-xs font-semibold text-red-600">
+                          Hidden from sidebar
+                        </p>
+                      )}
+                    </td>
+
+                    <td className="p-4 align-top text-muted-foreground">
+                      {row.allowed_actions}
+                    </td>
+
+                    {roleColumns.map((role) => (
+                      <td key={role} className="p-4 text-center align-top">
+                        <AccessMark allowed={allowedRoles.includes(role)} />
+                      </td>
+                    ))}
+
+                    <td className="p-4 text-right align-top">
+                      <EditRoleAccessButton
+                        row={{
+                          id: row.id,
+                          page_key: row.page_key,
+                          page_label: row.page_label,
+                          page_href: row.page_href,
+                          allowed_actions: row.allowed_actions,
+                          allowed_roles: allowedRoles,
+                          is_visible: Boolean(row.is_visible),
+                        }}
+                      />
+                    </td>
+                  </tr>
+                )
+              })}
+
+              {allRoleAccessRows.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={roleColumns.length + 3}
+                    className="p-10 text-center text-muted-foreground"
+                  >
+                    No role access matrix rows found. Run the Supabase SQL to
+                    create and seed admin_role_access_matrix.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </section>
     </div>

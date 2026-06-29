@@ -13,6 +13,13 @@ function getSelectedRoles(formData: FormData) {
   return roles.length > 0 ? roles : ["Employee"]
 }
 
+function getSelectedMatrixRoles(formData: FormData) {
+  return formData
+    .getAll("matrix_roles")
+    .map((role) => String(role || "").trim())
+    .filter(Boolean)
+}
+
 export async function createWorkflowTeamMember(formData: FormData) {
   await requireAdminUser(["Admin"])
 
@@ -85,4 +92,48 @@ export async function updateWorkflowTeamMember(formData: FormData) {
   revalidatePath("/admin/workflow/team")
   revalidatePath("/admin/workflow/tasks")
   revalidatePath("/admin/workflow/enquiries")
+}
+
+export async function updateRoleAccessMatrix(formData: FormData) {
+  await requireAdminUser(["Admin"])
+
+  const matrixId = String(formData.get("matrix_id") || "").trim()
+  const allowedActions = String(formData.get("allowed_actions") || "").trim()
+  const isVisible = String(formData.get("is_visible") || "true") === "true"
+  const selectedRoles = getSelectedMatrixRoles(formData)
+
+  if (!matrixId) {
+    throw new Error("Matrix row ID is required.")
+  }
+
+  if (!allowedActions) {
+    throw new Error("Allowed actions description is required.")
+  }
+
+  if (selectedRoles.length === 0) {
+    throw new Error("Select at least one role.")
+  }
+
+  const { error } = await supabaseAdmin
+    .from("admin_role_access_matrix")
+    .update({
+      allowed_actions: allowedActions,
+      allowed_roles: selectedRoles,
+      is_visible: isVisible,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", matrixId)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  revalidatePath("/admin/workflow/team")
+  revalidatePath("/admin/workflow")
+  revalidatePath("/admin/workflow/orders")
+  revalidatePath("/admin/workflow/enquiries")
+  revalidatePath("/admin/workflow/tasks")
+  revalidatePath("/admin/workflow/stock-report")
+  revalidatePath("/admin/products")
+  revalidatePath("/admin/brochure-import")
 }
