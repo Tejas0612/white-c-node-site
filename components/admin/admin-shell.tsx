@@ -11,10 +11,10 @@ export async function AdminShell({
   const user = await requireAdminUser(allowedRoles)
 
   return (
-    <div className="flex min-h-screen bg-muted/30">
-      <WorkflowSidebar />
+    <div className="flex min-h-screen overflow-x-hidden bg-muted/30">
+      <WorkflowSidebar user={user} />
 
-      <main className="flex-1 overflow-hidden">
+      <main className="min-w-0 flex-1 overflow-hidden">
         <header className="flex items-center justify-between border-b bg-background px-6 py-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -30,7 +30,7 @@ export async function AdminShell({
           </form>
         </header>
 
-        <div className="p-6">{children}</div>
+        <div className="min-w-0 p-6">{children}</div>
       </main>
     </div>
   )

@@ -1,8 +1,16 @@
 import { supabaseAdmin } from "@/lib/supabase-admin"
 import { AssignTaskModal } from "./assign-task-modal"
-import { SendAllTaskRemindersButton, TaskActions } from "./task-actions"
+import { TaskActions } from "./task-actions"
 
 export const dynamic = "force-dynamic"
+
+function StatusPill({ label }: { label: string }) {
+  return (
+    <span className="inline-flex rounded-full bg-muted px-3 py-1 text-xs font-semibold">
+      {label}
+    </span>
+  )
+}
 
 export default async function WorkflowTasksPage() {
   const { data: tasks, error } = await supabaseAdmin
@@ -33,7 +41,7 @@ export default async function WorkflowTasksPage() {
   const remarkedTasks = allTasks.filter((task) => task.status === "Remarked")
 
   return (
-    <div>
+    <div className="max-w-full overflow-hidden">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -41,12 +49,11 @@ export default async function WorkflowTasksPage() {
           </p>
           <h1 className="mt-2 text-4xl font-bold tracking-tight">Tasks</h1>
           <p className="mt-2 text-muted-foreground">
-            Assign tasks, track follow-ups, and send WhatsApp reminders from the
-            connected White C sender number.
+            Assign tasks, send WhatsApp reminders, and track completion.
           </p>
         </div>
 
-        <SendAllTaskRemindersButton />
+        <AssignTaskModal teamMembers={activeTeamMembers} />
       </div>
 
       {error && (
@@ -85,97 +92,87 @@ export default async function WorkflowTasksPage() {
       </div>
 
       <section className="mt-8 rounded-2xl border bg-background">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b p-5">
-          <div>
-            <h2 className="text-xl font-bold">Task List</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Send reminders, update task status, and capture remarks.
-            </p>
-          </div>
-
-          <AssignTaskModal teamMembers={activeTeamMembers} />
+        <div className="border-b p-5">
+          <h2 className="text-xl font-bold">Task List</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Compact task view without horizontal scrolling.
+          </p>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1050px] text-sm">
-            <thead>
-              <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="px-5 py-4">Code</th>
-                <th className="px-5 py-4">Task</th>
-                <th className="px-5 py-4">Assignee</th>
-                <th className="px-5 py-4">Due</th>
-                <th className="px-5 py-4">Status</th>
-                <th className="px-5 py-4">Remark</th>
-                <th className="px-5 py-4 text-right">Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {allTasks.map((task) => (
-                <tr key={task.id} className="border-b">
-                  <td className="px-5 py-4 font-mono text-xs text-muted-foreground">
-                    {task.task_code}
-                  </td>
-
-                  <td className="px-5 py-4">
-                    <p className="font-semibold">{task.title}</p>
-                    {task.description && (
-                      <p className="mt-1 max-w-md truncate text-xs text-muted-foreground">
-                        {task.description}
-                      </p>
-                    )}
-                  </td>
-
-                  <td className="px-5 py-4">
-                    <p className="font-medium">
-                      {task.workflow_team_members?.name || "Unassigned"}
+        <div className="divide-y">
+          {allTasks.map((task) => (
+            <div key={task.id} className="p-5">
+              <div className="grid gap-5 xl:grid-cols-[1.6fr_1fr_0.9fr_1fr_1.15fr]">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-mono text-xs font-semibold text-muted-foreground">
+                      {task.task_code}
                     </p>
+                    <StatusPill label={task.status || "Pending"} />
+                  </div>
 
-                    {task.workflow_team_members?.whatsapp ? (
-                      <p className="mt-1 text-xs font-semibold text-green-600">
-                        {task.workflow_team_members.whatsapp}
-                      </p>
-                    ) : (
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        No WhatsApp
-                      </p>
-                    )}
-                  </td>
+                  <h3 className="mt-2 text-base font-bold">{task.title}</h3>
 
-                  <td className="px-5 py-4">{task.due_date || "—"}</td>
+                  {task.description && (
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {task.description}
+                    </p>
+                  )}
+                </div>
 
-                  <td className="px-5 py-4">
-                    <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold">
-                      {task.status}
-                    </span>
-                  </td>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Assignee
+                  </p>
+                  <p className="mt-1 font-semibold">
+                    {task.workflow_team_members?.name || "Unassigned"}
+                  </p>
 
-                  <td className="px-5 py-4 text-muted-foreground">
+                  {task.workflow_team_members?.whatsapp ? (
+                    <p className="mt-1 text-xs font-semibold text-green-600">
+                      {task.workflow_team_members.whatsapp}
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      No WhatsApp
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Due Date
+                  </p>
+                  <p className="mt-1 whitespace-nowrap font-medium">
+                    {task.due_date || "—"}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Remark
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
                     {task.remark || "—"}
-                  </td>
+                  </p>
+                </div>
 
-                  <td className="px-5 py-4 text-right">
-                    <TaskActions
-                      taskId={task.id}
-                      taskCode={task.task_code}
-                      currentStatus={task.status}
-                    />
-                  </td>
-                </tr>
-              ))}
+                <div className="flex justify-start xl:justify-end">
+                  <TaskActions
+                    taskId={task.id}
+                    taskCode={task.task_code}
+                    currentStatus={task.status || "Pending"}
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
 
-              {allTasks.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="px-5 py-10 text-center text-muted-foreground"
-                  >
-                    No tasks found.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+          {allTasks.length === 0 && (
+            <div className="p-10 text-center text-muted-foreground">
+              No tasks found.
+            </div>
+          )}
         </div>
       </section>
     </div>

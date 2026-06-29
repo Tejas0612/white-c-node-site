@@ -169,3 +169,55 @@ export async function createWorkflowEnquiry(formData: FormData) {
   revalidatePath("/admin/workflow/enquiries")
   revalidatePath("/admin/workflow")
 }
+
+export async function updateWorkflowEnquiryRemark({
+  enquiryId,
+  remark,
+  status,
+  successProbability,
+  proposalStatus,
+  clientResponseStatus,
+  poStatus,
+}: {
+  enquiryId: string
+  remark: string
+  status: string
+  successProbability: number
+  proposalStatus: string
+  clientResponseStatus: string
+  poStatus: string
+}) {
+  await requireAdminUser(["Sales", "Operations"])
+
+  const cleanRemark = String(remark || "").trim()
+
+  if (!enquiryId) {
+    throw new Error("Enquiry ID is required.")
+  }
+
+  if (!cleanRemark) {
+    throw new Error("Remark is required.")
+  }
+
+  const { error } = await supabaseAdmin
+    .from("workflow_enquiries")
+    .update({
+      remarks: cleanRemark,
+      status: status || "In Progress",
+      success_probability: successProbability,
+      proposal_status: proposalStatus || "Draft Needed",
+      client_response_status: clientResponseStatus || "No Response Yet",
+      po_status: poStatus || "Not Received",
+      converted_to_order: status === "Won",
+      last_client_interaction_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", enquiryId)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  revalidatePath("/admin/workflow/enquiries")
+  revalidatePath("/admin/workflow")
+}

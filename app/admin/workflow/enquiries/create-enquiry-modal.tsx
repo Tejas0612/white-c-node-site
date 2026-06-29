@@ -1,15 +1,14 @@
 "use client"
 
-import { useRef, useState, useTransition } from "react"
+import { useState, useTransition } from "react"
 import { createWorkflowEnquiry } from "./actions"
 
 type TeamMember = {
   id: string
   name: string
-  role: string | null
-  email: string | null
-  whatsapp: string | null
-  is_active: boolean
+  role?: string | null
+  whatsapp?: string | null
+  is_active?: boolean | null
 }
 
 export function CreateEnquiryModal({
@@ -18,9 +17,8 @@ export function CreateEnquiryModal({
   teamMembers: TeamMember[]
 }) {
   const [isOpen, setIsOpen] = useState(false)
-  const [isPending, startTransition] = useTransition()
   const [error, setError] = useState("")
-  const formRef = useRef<HTMLFormElement>(null)
+  const [isPending, startTransition] = useTransition()
 
   function handleSubmit(formData: FormData) {
     setError("")
@@ -28,7 +26,6 @@ export function CreateEnquiryModal({
     startTransition(async () => {
       try {
         await createWorkflowEnquiry(formData)
-        formRef.current?.reset()
         setIsOpen(false)
       } catch (enquiryError: any) {
         setError(enquiryError?.message || "Failed to create enquiry.")
@@ -41,7 +38,7 @@ export function CreateEnquiryModal({
       <button
         type="button"
         onClick={() => setIsOpen(true)}
-        className="rounded-xl bg-foreground px-4 py-2 text-sm font-semibold text-background"
+        className="rounded-xl bg-foreground px-5 py-2 text-sm font-semibold text-background hover:opacity-90"
       >
         + New Enquiry
       </button>
@@ -53,8 +50,7 @@ export function CreateEnquiryModal({
               <div>
                 <h3 className="text-2xl font-bold">New Enquiry</h3>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Add a customer requirement, trigger acknowledgement email, and
-                  track proposal progress.
+                  Add a new client enquiry and assign it to the right team member.
                 </p>
               </div>
 
@@ -67,14 +63,14 @@ export function CreateEnquiryModal({
               </button>
             </div>
 
-            <form ref={formRef} action={handleSubmit} className="grid gap-5 p-6">
-              <div className="grid gap-4 md:grid-cols-2">
+            <form action={handleSubmit} className="grid gap-5 p-6">
+              <div className="grid gap-5 md:grid-cols-2">
                 <div>
                   <label className="text-sm font-semibold">Client Name</label>
                   <input
                     name="client_name"
-                    placeholder="Example: Nuvoco"
                     required
+                    placeholder="Example: Novoco"
                     className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
                   />
                 </div>
@@ -83,24 +79,25 @@ export function CreateEnquiryModal({
                   <label className="text-sm font-semibold">Assigned To</label>
                   <select
                     name="assigned_to"
+                    defaultValue=""
                     className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
                   >
                     <option value="">Unassigned</option>
                     {teamMembers.map((member) => (
                       <option key={member.id} value={member.id}>
-                        {member.name} {member.role ? `— ${member.role}` : ""}
+                        {member.name}
                       </option>
                     ))}
                   </select>
                 </div>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-5 md:grid-cols-2">
                 <div>
                   <label className="text-sm font-semibold">Client Phone</label>
                   <input
                     name="client_phone"
-                    placeholder="+919876543210"
+                    placeholder="Example: +919836232942"
                     className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
                   />
                 </div>
@@ -117,22 +114,23 @@ export function CreateEnquiryModal({
               </div>
 
               <div>
-                <label className="text-sm font-semibold">Product(s)</label>
-                <input
+                <label className="text-sm font-semibold">Product / Requirement</label>
+                <textarea
                   name="product_names"
-                  placeholder="Example: Backpacks, bottles, employee kits"
-                  className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
+                  rows={3}
+                  placeholder="Example: Premium bottles under ₹500 for 500 employees"
+                  className="mt-2 w-full rounded-xl border bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
                 />
               </div>
 
-              <div className="grid gap-4 md:grid-cols-4">
+              <div className="grid gap-5 md:grid-cols-3">
                 <div>
-                  <label className="text-sm font-semibold">Tentative Qty</label>
+                  <label className="text-sm font-semibold">Tentative Quantity</label>
                   <input
                     type="number"
                     name="tentative_quantity"
-                    placeholder="300"
-                    min="0"
+                    min="1"
+                    defaultValue="1"
                     className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
                   />
                 </div>
@@ -142,8 +140,8 @@ export function CreateEnquiryModal({
                   <input
                     type="number"
                     name="approx_cost"
-                    placeholder="500000"
                     min="0"
+                    defaultValue="0"
                     className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
                   />
                 </div>
@@ -153,6 +151,85 @@ export function CreateEnquiryModal({
                   <input
                     type="date"
                     name="enquiry_date"
+                    defaultValue={new Date().toISOString().slice(0, 10)}
+                    className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-5 md:grid-cols-3">
+                <div>
+                  <label className="text-sm font-semibold">Status</label>
+                  <select
+                    name="status"
+                    defaultValue="New"
+                    className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
+                  >
+                    <option value="New">New</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Proposal Sent">Proposal Sent</option>
+                    <option value="Follow Up">Follow Up</option>
+                    <option value="Won">Won</option>
+                    <option value="Lost">Lost</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-sm font-semibold">Proposal Status</label>
+                  <select
+                    name="proposal_status"
+                    defaultValue="Draft Needed"
+                    className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
+                  >
+                    <option value="Draft Needed">Draft Needed</option>
+                    <option value="Draft Ready">Draft Ready</option>
+                    <option value="Sent for Approval">Sent for Approval</option>
+                    <option value="Approved">Approved</option>
+                    <option value="Sent to Client">Sent to Client</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-sm font-semibold">Client Response</label>
+                  <select
+                    name="client_response_status"
+                    defaultValue="No Response Yet"
+                    className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
+                  >
+                    <option value="No Response Yet">No Response Yet</option>
+                    <option value="Interested">Interested</option>
+                    <option value="Needs Revision">Needs Revision</option>
+                    <option value="Negotiating">Negotiating</option>
+                    <option value="Confirmed">Confirmed</option>
+                    <option value="Not Interested">Not Interested</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid gap-5 md:grid-cols-3">
+                <div>
+                  <label className="text-sm font-semibold">PO Status</label>
+                  <select
+                    name="po_status"
+                    defaultValue="Not Received"
+                    className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
+                  >
+                    <option value="Not Received">Not Received</option>
+                    <option value="Requested">Requested</option>
+                    <option value="Received">Received</option>
+                    <option value="Payment Pending">Payment Pending</option>
+                    <option value="Payment Received">Payment Received</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-sm font-semibold">Success Probability</label>
+                  <input
+                    type="number"
+                    name="success_probability"
+                    min="0"
+                    max="100"
+                    defaultValue="10"
                     className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
                   />
                 </div>
@@ -167,91 +244,12 @@ export function CreateEnquiryModal({
                 </div>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-4">
-                <div>
-                  <label className="text-sm font-semibold">Status</label>
-                  <select
-                    name="status"
-                    defaultValue="New"
-                    className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
-                  >
-                    <option value="New">New</option>
-                    <option value="Contacted">Contacted</option>
-                    <option value="Quote Sent">Quote Sent</option>
-                    <option value="Won">Won</option>
-                    <option value="Lost">Lost</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-sm font-semibold">Proposal</label>
-                  <select
-                    name="proposal_status"
-                    defaultValue="Draft Needed"
-                    className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
-                  >
-                    <option value="Draft Needed">Draft Needed</option>
-                    <option value="Draft Created">Draft Created</option>
-                    <option value="Sent for Approval">Sent for Approval</option>
-                    <option value="Shared with Client">Shared with Client</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-sm font-semibold">Client Response</label>
-                  <select
-                    name="client_response_status"
-                    defaultValue="No Response Yet"
-                    className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
-                  >
-                    <option value="No Response Yet">No Response Yet</option>
-                    <option value="Responded">Responded</option>
-                    <option value="Follow-up Required">Follow-up Required</option>
-                    <option value="Not Interested">Not Interested</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-sm font-semibold">PO Status</label>
-                  <select
-                    name="po_status"
-                    defaultValue="Not Received"
-                    className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
-                  >
-                    <option value="Not Received">Not Received</option>
-                    <option value="Expected">Expected</option>
-                    <option value="Received">Received</option>
-                    <option value="Payment Pending">Payment Pending</option>
-                    <option value="Payment Received">Payment Received</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-sm font-semibold">
-                  Potential Order Success %
-                </label>
-                <input
-                  type="range"
-                  name="success_probability"
-                  min="0"
-                  max="100"
-                  step="5"
-                  defaultValue="10"
-                  className="mt-3 w-full"
-                />
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Use higher score when client responds, proposal is shared, PO
-                  is expected, or payment is near.
-                </p>
-              </div>
-
               <div>
                 <label className="text-sm font-semibold">Remarks</label>
                 <textarea
                   name="remarks"
-                  placeholder="Add requirement details, budget range, deadline, proposal notes, or follow-up context."
-                  rows={4}
+                  rows={3}
+                  placeholder="Internal notes"
                   className="mt-2 w-full rounded-xl border bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
                 />
               </div>
@@ -276,7 +274,7 @@ export function CreateEnquiryModal({
                   disabled={isPending}
                   className="rounded-xl bg-foreground px-5 py-2 text-sm font-semibold text-background disabled:opacity-60"
                 >
-                  {isPending ? "Saving..." : "Save Enquiry"}
+                  {isPending ? "Saving..." : "Create Enquiry"}
                 </button>
               </div>
             </form>

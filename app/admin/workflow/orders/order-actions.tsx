@@ -2,75 +2,50 @@
 
 import { useState, useTransition } from "react"
 import {
-  markWorkflowTaskDone,
-  updateWorkflowTaskRemark,
+  updateWorkflowOrderRemark,
+  updateWorkflowOrderStatus,
 } from "./actions"
 
-type TaskActionsProps = {
-  taskId: string
-  taskCode: string
-  currentStatus: string
-}
+const orderStatuses = [
+  "New",
+  "Processing",
+  "Dispatched",
+  "Delivered",
+  "On Hold",
+  "Cancelled",
+]
 
-export function TaskActions({
-  taskId,
-  taskCode,
+export function OrderActions({
+  orderId,
+  orderCode,
   currentStatus,
-}: TaskActionsProps) {
-  const [isRemarkOpen, setIsRemarkOpen] = useState(false)
+}: {
+  orderId: string
+  orderCode: string
+  currentStatus: string
+}) {
+  const [status, setStatus] = useState(currentStatus || "New")
   const [remark, setRemark] = useState("")
-  const [status, setStatus] = useState(
-    currentStatus === "Done" ? "Done" : "Remarked"
-  )
+  const [isRemarkOpen, setIsRemarkOpen] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
   const [isPending, startTransition] = useTransition()
 
-  const isDone = currentStatus === "Done"
-
-  function handleSendReminder() {
+  function handleStatusChange(nextStatus: string) {
+    setStatus(nextStatus)
     setError("")
     setSuccess("")
 
     startTransition(async () => {
       try {
-        const response = await fetch("/api/whatsapp/send-task-reminder", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            mode: "single",
-            taskId,
-          }),
+        await updateWorkflowOrderStatus({
+          orderId,
+          status: nextStatus,
         })
 
-        const result = await response.json()
-
-        if (!response.ok || !result.success) {
-          throw new Error(result.message || "Failed to send reminder.")
-        }
-
-        setSuccess(
-          result.to
-            ? `Sent to ${result.to}`
-            : "Reminder sent"
-        )
-      } catch (sendError: any) {
-        setError(sendError?.message || "Failed to send reminder.")
-      }
-    })
-  }
-
-  function handleMarkDone() {
-    setError("")
-    setSuccess("")
-
-    startTransition(async () => {
-      try {
-        await markWorkflowTaskDone(taskId)
-      } catch (taskError: any) {
-        setError(taskError?.message || "Failed to mark task done.")
+        setSuccess("Status updated")
+      } catch (statusError: any) {
+        setError(statusError?.message || "Failed to update status.")
       }
     })
   }
@@ -81,56 +56,44 @@ export function TaskActions({
 
     startTransition(async () => {
       try {
-        await updateWorkflowTaskRemark({
-          taskId,
+        await updateWorkflowOrderRemark({
+          orderId,
           remark,
           status,
         })
 
         setRemark("")
         setIsRemarkOpen(false)
-      } catch (taskError: any) {
-        setError(taskError?.message || "Failed to save remark.")
+        setSuccess("Remark saved")
+      } catch (remarkError: any) {
+        setError(remarkError?.message || "Failed to save remark.")
       }
     })
   }
 
   return (
     <>
-      <div className="w-full max-w-[280px]">
-        <div className="grid grid-cols-3 gap-2">
-          {!isDone ? (
-            <button
-              type="button"
-              onClick={handleSendReminder}
-              disabled={isPending}
-              className="h-9 rounded-xl border px-3 text-xs font-semibold text-green-700 hover:bg-green-50 disabled:opacity-60"
-            >
-              {isPending ? "..." : "Send"}
-            </button>
-          ) : (
-            <div />
-          )}
-
-          {!isDone ? (
-            <button
-              type="button"
-              onClick={handleMarkDone}
-              disabled={isPending}
-              className="h-9 rounded-xl border px-3 text-xs font-semibold hover:bg-muted disabled:opacity-60"
-            >
-              Done
-            </button>
-          ) : (
-            <div />
-          )}
+      <div className="w-full max-w-[300px]">
+        <div className="grid gap-2">
+          <select
+            value={status}
+            onChange={(event) => handleStatusChange(event.target.value)}
+            disabled={isPending}
+            className="h-9 rounded-xl border bg-background px-3 text-xs font-semibold outline-none disabled:opacity-60"
+          >
+            {orderStatuses.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
 
           <button
             type="button"
             onClick={() => setIsRemarkOpen(true)}
             className="h-9 rounded-xl border px-3 text-xs font-semibold hover:bg-muted"
           >
-            Remark
+            Add Remark
           </button>
         </div>
 
@@ -154,9 +117,9 @@ export function TaskActions({
           <div className="w-full max-w-xl rounded-3xl border bg-background shadow-2xl">
             <div className="flex items-start justify-between gap-4 border-b p-6">
               <div>
-                <h3 className="text-2xl font-bold">Add Task Remark</h3>
+                <h3 className="text-2xl font-bold">Add Order Remark</h3>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Add an update for task {taskCode}.
+                  Add an internal update for {orderCode}.
                 </p>
               </div>
 
@@ -177,9 +140,11 @@ export function TaskActions({
                   onChange={(event) => setStatus(event.target.value)}
                   className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
                 >
-                  <option value="Remarked">Remarked</option>
-                  <option value="Pending">Pending</option>
-                  <option value="Done">Done</option>
+                  {orderStatuses.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -188,8 +153,8 @@ export function TaskActions({
                 <textarea
                   value={remark}
                   onChange={(event) => setRemark(event.target.value)}
-                  placeholder="Example: Vendor confirmed dispatch by tomorrow."
                   rows={4}
+                  placeholder="Example: Client approved artwork, production started."
                   className="mt-2 w-full rounded-xl border bg-background px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
                 />
               </div>

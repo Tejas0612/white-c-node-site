@@ -1,58 +1,15 @@
 import { supabaseAdmin } from "@/lib/supabase-admin"
-import { requireAdminUser } from "@/lib/admin-auth"
 import { CreateEnquiryModal } from "./create-enquiry-modal"
+import { EnquiryActions } from "./enquiry-actions"
 
 export const dynamic = "force-dynamic"
 
-function formatCurrency(value: number) {
+function formatCurrency(value: number | null) {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 0,
-  }).format(value)
-}
-
-function cleanPhone(phone: string | null | undefined) {
-  return String(phone || "").replace(/\D/g, "")
-}
-
-function createWhatsAppUrl(phone: string | null | undefined, message: string) {
-  const cleanedPhone = cleanPhone(phone)
-
-  if (!cleanedPhone) return "#"
-
-  return `https://web.whatsapp.com/send?phone=${cleanedPhone}&text=${encodeURIComponent(
-    message
-  )}`
-}
-
-function createClientFollowUpMessage(enquiry: any) {
-  return `Hi ${enquiry.client_name}, this is regarding your White C gifting enquiry for ${
-    enquiry.product_names || "your selected products"
-  }.
-
-We are reviewing the requirement and will share suitable options/quotation shortly.
-
-Thanks,
-White C`
-}
-
-function SuccessBar({ value }: { value: number }) {
-  const safeValue = Math.max(0, Math.min(100, Number(value || 0)))
-
-  return (
-    <div>
-      <div className="h-2 overflow-hidden rounded-full bg-muted">
-        <div
-          className="h-full rounded-full bg-green-600"
-          style={{ width: `${safeValue}%` }}
-        />
-      </div>
-      <p className="mt-1 text-xs font-semibold text-muted-foreground">
-        {safeValue}% potential
-      </p>
-    </div>
-  )
+  }).format(Number(value || 0))
 }
 
 function StatusPill({ label }: { label: string }) {
@@ -63,59 +20,67 @@ function StatusPill({ label }: { label: string }) {
   )
 }
 
-export default async function WorkflowEnquiriesPage() {
-  await requireAdminUser(["Sales", "Operations"])
+function SuccessBar({ value }: { value: number }) {
+  const safeValue = Math.max(0, Math.min(100, Number(value || 0)))
 
+  return (
+    <div>
+      <div className="h-2 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-foreground"
+          style={{ width: `${safeValue}%` }}
+        />
+      </div>
+      <p className="mt-1 text-xs font-semibold text-muted-foreground">
+        {safeValue}% chance
+      </p>
+    </div>
+  )
+}
+
+export default async function WorkflowEnquiriesPage() {
   const { data: enquiries, error } = await supabaseAdmin
     .from("workflow_enquiries")
-    .select("*")
+    .select(
+      `
+      *,
+      workflow_team_members (
+        name,
+        whatsapp
+      )
+    `
+    )
     .order("created_at", { ascending: false })
 
   const { data: teamMembers } = await supabaseAdmin
     .from("workflow_team_members")
-    .select("id, name, role, email, whatsapp, is_active")
+    .select("id, name, role, whatsapp, is_active")
     .eq("is_active", true)
     .order("name", { ascending: true })
 
   const allEnquiries = enquiries || []
   const activeTeamMembers = teamMembers || []
 
-  const newEnquiries = allEnquiries.filter(
-    (enquiry) => enquiry.status === "New"
-  )
-
-  const quoteSentEnquiries = allEnquiries.filter(
-    (enquiry) => enquiry.status === "Quote Sent"
-  )
-
-  const wonEnquiries = allEnquiries.filter(
-    (enquiry) => enquiry.status === "Won" || enquiry.converted_to_order
-  )
-
-  const poReceived = allEnquiries.filter(
-    (enquiry) =>
-      enquiry.po_status === "Received" ||
-      enquiry.po_status === "Payment Received"
-  )
-
-  const totalApproxValue = allEnquiries.reduce(
-    (total, enquiry) => total + Number(enquiry.approx_cost || 0),
+  const totalValue = allEnquiries.reduce(
+    (sum, enquiry) => sum + Number(enquiry.approx_cost || 0),
     0
   )
+
+  const wonCount = allEnquiries.filter((enquiry) => enquiry.status === "Won").length
+  const activeCount = allEnquiries.filter(
+    (enquiry) => enquiry.status !== "Won" && enquiry.status !== "Lost"
+  ).length
 
   return (
     <div className="max-w-full overflow-hidden">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Pipeline
+            Workflow
           </p>
-          <h1 className="mt-2 text-4xl font-bold tracking-tight">
-            Customer Enquiries
-          </h1>
+          <h1 className="mt-2 text-4xl font-bold tracking-tight">Enquiries</h1>
           <p className="mt-2 text-muted-foreground">
-            Track enquiries, proposals, client responses, PO status, and
-            conversion potential.
+            Track client enquiries, proposal status, WhatsApp updates, and conversion probability.
           </p>
         </div>
 
@@ -128,172 +93,136 @@ export default async function WorkflowEnquiriesPage() {
         </div>
       )}
 
-      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
-        <div className="rounded-2xl border bg-background p-5">
+      <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-2xl border bg-background p-6">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            New
+            Total Enquiries
           </p>
-          <h2 className="mt-3 text-3xl font-bold text-blue-600">
-            {newEnquiries.length}
+          <h2 className="mt-4 text-4xl font-bold">{allEnquiries.length}</h2>
+        </div>
+
+        <div className="rounded-2xl border bg-background p-6">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Active
+          </p>
+          <h2 className="mt-4 text-4xl font-bold text-orange-600">
+            {activeCount}
           </h2>
         </div>
 
-        <div className="rounded-2xl border bg-background p-5">
+        <div className="rounded-2xl border bg-background p-6">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Quote Sent
+            Won
           </p>
-          <h2 className="mt-3 text-3xl font-bold">
-            {quoteSentEnquiries.length}
+          <h2 className="mt-4 text-4xl font-bold text-green-600">
+            {wonCount}
           </h2>
         </div>
 
-        <div className="rounded-2xl border bg-background p-5">
+        <div className="rounded-2xl border bg-background p-6">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            PO / Payment
+            Pipeline Value
           </p>
-          <h2 className="mt-3 text-3xl font-bold text-purple-600">
-            {poReceived.length}
-          </h2>
-        </div>
-
-        <div className="rounded-2xl border bg-background p-5">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Converted
-          </p>
-          <h2 className="mt-3 text-3xl font-bold text-green-600">
-            {wonEnquiries.length}
-          </h2>
-        </div>
-
-        <div className="rounded-2xl border bg-background p-5 sm:col-span-2 lg:col-span-1">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Approx Value
-          </p>
-          <h2 className="mt-3 text-2xl font-bold">
-            {formatCurrency(totalApproxValue)}
+          <h2 className="mt-4 text-3xl font-bold">
+            {formatCurrency(totalValue)}
           </h2>
         </div>
       </div>
 
       <section className="mt-8 rounded-2xl border bg-background">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b p-5">
-          <div>
-            <h2 className="text-xl font-bold">Enquiry List</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Compact view without horizontal scrolling.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <StatusPill label="Current" />
-            <StatusPill label="Won" />
-            <StatusPill label="Lost" />
-          </div>
+        <div className="border-b p-5">
+          <h2 className="text-xl font-bold">Enquiry List</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Send WhatsApp updates and maintain enquiry remarks.
+          </p>
         </div>
 
         <div className="divide-y">
-          {allEnquiries.map((enquiry) => {
-            const message = createClientFollowUpMessage(enquiry)
-            const whatsappUrl = createWhatsAppUrl(enquiry.client_phone, message)
-
-            return (
-              <div key={enquiry.id} className="p-5">
-                <div className="grid gap-5 xl:grid-cols-[1.2fr_1.4fr_1fr_1fr_1fr]">
-                  <div>
-                    <p className="font-bold">{enquiry.client_name}</p>
-                    <p className="mt-1 font-mono text-xs text-muted-foreground">
+          {allEnquiries.map((enquiry) => (
+            <div key={enquiry.id} className="p-5">
+              <div className="grid gap-5 xl:grid-cols-[1.2fr_1.3fr_1fr_1fr_1.15fr]">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-mono text-xs font-semibold text-muted-foreground">
                       {enquiry.enquiry_code}
                     </p>
-
-                    <div className="mt-3">
-                      <StatusPill label={enquiry.status || "New"} />
-                    </div>
+                    <StatusPill label={enquiry.status || "New"} />
                   </div>
 
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Product / Requirement
-                    </p>
-                    <p className="mt-1 font-medium">
-                      {enquiry.product_names || "—"}
-                    </p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Qty: {enquiry.tentative_quantity || "—"}
-                    </p>
-                  </div>
+                  <h3 className="mt-2 text-base font-bold">
+                    {enquiry.client_name}
+                  </h3>
 
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Approx Value
-                    </p>
-                    <p className="mt-1 text-lg font-bold">
-                      {formatCurrency(Number(enquiry.approx_cost || 0))}
-                    </p>
-
-                    <div className="mt-3">
-                      <SuccessBar
-                        value={Number(enquiry.success_probability || 0)}
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Progress
-                    </p>
-                    <div className="mt-2 space-y-2 text-sm">
-                      <p>
-                        <span className="text-muted-foreground">Proposal:</span>{" "}
-                        {enquiry.proposal_status || "Draft Needed"}
-                      </p>
-                      <p>
-                        <span className="text-muted-foreground">Response:</span>{" "}
-                        {enquiry.client_response_status || "No Response Yet"}
-                      </p>
-                      <p>
-                        <span className="text-muted-foreground">PO:</span>{" "}
-                        {enquiry.po_status || "Not Received"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Contact
-                    </p>
-
-                    {enquiry.client_phone ? (
-                      <a
-                        href={whatsappUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-1 inline-block font-semibold text-green-600 hover:underline"
-                      >
-                        {enquiry.client_phone}
-                      </a>
-                    ) : (
-                      <p className="mt-1 text-muted-foreground">No phone</p>
-                    )}
-
-                    {enquiry.client_email && (
-                      <p className="mt-1 break-all text-xs text-muted-foreground">
-                        {enquiry.client_email}
-                      </p>
-                    )}
+                  <div className="mt-2 space-y-1 text-sm text-muted-foreground">
+                    <p>{enquiry.client_phone || "No phone"}</p>
+                    <p>{enquiry.client_email || "No email"}</p>
                   </div>
                 </div>
 
-                {enquiry.remarks && (
-                  <div className="mt-4 rounded-xl bg-muted/50 p-4 text-sm text-muted-foreground">
-                    <span className="font-semibold text-foreground">
-                      Remarks:
-                    </span>{" "}
-                    {enquiry.remarks}
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Requirement
+                  </p>
+                  <p className="mt-1 font-semibold">
+                    {enquiry.product_names || "—"}
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Qty: {enquiry.tentative_quantity || "—"}
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Approx: {formatCurrency(enquiry.approx_cost)}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Proposal
+                  </p>
+                  <p className="mt-1 text-sm font-semibold">
+                    {enquiry.proposal_status || "Draft Needed"}
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Client: {enquiry.client_response_status || "No Response Yet"}
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    PO: {enquiry.po_status || "Not Received"}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Success
+                  </p>
+                  <div className="mt-3">
+                    <SuccessBar value={enquiry.success_probability || 0} />
                   </div>
-                )}
+
+                  <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Remark
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {enquiry.remarks || "—"}
+                  </p>
+                </div>
+
+                <div className="flex justify-start xl:justify-end">
+                  <EnquiryActions
+                    enquiryId={enquiry.id}
+                    enquiryCode={enquiry.enquiry_code}
+                    currentStatus={enquiry.status || "New"}
+                    currentRemark={enquiry.remarks || ""}
+                    successProbability={enquiry.success_probability || 10}
+                    proposalStatus={enquiry.proposal_status || "Draft Needed"}
+                    clientResponseStatus={
+                      enquiry.client_response_status || "No Response Yet"
+                    }
+                    poStatus={enquiry.po_status || "Not Received"}
+                    hasPhone={Boolean(enquiry.client_phone)}
+                  />
+                </div>
               </div>
-            )
-          })}
+            </div>
+          ))}
 
           {allEnquiries.length === 0 && (
             <div className="p-10 text-center text-muted-foreground">

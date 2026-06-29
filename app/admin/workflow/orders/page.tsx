@@ -1,19 +1,26 @@
 import { supabaseAdmin } from "@/lib/supabase-admin"
-import { requireAdminUser } from "@/lib/admin-auth"
+import { CreateOrderModal } from "./create-order-modal"
+import { OrderActions } from "./order-actions"
 
 export const dynamic = "force-dynamic"
 
-function formatCurrency(value: number) {
+function formatCurrency(value: number | null) {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 0,
-  }).format(value)
+  }).format(Number(value || 0))
+}
+
+function StatusPill({ label }: { label: string }) {
+  return (
+    <span className="inline-flex rounded-full bg-muted px-3 py-1 text-xs font-semibold">
+      {label}
+    </span>
+  )
 }
 
 export default async function WorkflowOrdersPage() {
-  await requireAdminUser(["Operations", "Accounts"])
-
   const { data: orders, error } = await supabaseAdmin
     .from("workflow_orders")
     .select("*")
@@ -21,36 +28,31 @@ export default async function WorkflowOrdersPage() {
 
   const allOrders = orders || []
 
-  const currentOrders = allOrders.filter(
-    (order) => order.status !== "Delivered" && order.status !== "Cancelled"
-  )
-
-  const deliveredOrders = allOrders.filter(
-    (order) => order.status === "Delivered"
-  )
-
-  const totalOrderValue = allOrders.reduce(
-    (total, order) => total + Number(order.order_value || 0),
+  const totalValue = allOrders.reduce(
+    (sum, order) => sum + Number(order.order_value || 0),
     0
   )
 
+  const activeOrders = allOrders.filter(
+    (order) =>
+      order.status !== "Delivered" &&
+      order.status !== "Cancelled"
+  )
+
   return (
-    <div>
+    <div className="max-w-full overflow-hidden">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Operations
+            Workflow
           </p>
           <h1 className="mt-2 text-4xl font-bold tracking-tight">Orders</h1>
           <p className="mt-2 text-muted-foreground">
-            Track customer orders, quantities, order value, PO links, and
-            fulfillment status.
+            Track confirmed orders, status updates, PO links, and remarks.
           </p>
         </div>
 
-        <button className="rounded-xl bg-foreground px-4 py-2 text-sm font-semibold text-background">
-          + New Order
-        </button>
+        <CreateOrderModal />
       </div>
 
       {error && (
@@ -62,131 +64,114 @@ export default async function WorkflowOrdersPage() {
       <div className="mt-8 grid gap-5 md:grid-cols-3">
         <div className="rounded-2xl border bg-background p-6">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Current Orders
+            Total Orders
           </p>
-          <h2 className="mt-4 text-4xl font-bold">{currentOrders.length}</h2>
+          <h2 className="mt-4 text-4xl font-bold">{allOrders.length}</h2>
         </div>
 
         <div className="rounded-2xl border bg-background p-6">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Delivered
+            Active Orders
           </p>
-          <h2 className="mt-4 text-4xl font-bold text-green-600">
-            {deliveredOrders.length}
+          <h2 className="mt-4 text-4xl font-bold text-orange-600">
+            {activeOrders.length}
           </h2>
         </div>
 
         <div className="rounded-2xl border bg-background p-6">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Total Order Value
+            Total Value
           </p>
           <h2 className="mt-4 text-3xl font-bold">
-            {formatCurrency(totalOrderValue)}
+            {formatCurrency(totalValue)}
           </h2>
         </div>
       </div>
 
       <section className="mt-8 rounded-2xl border bg-background">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b p-5">
-          <div>
-            <h2 className="text-xl font-bold">Order List</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Current and archived order pipeline.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <span className="rounded-xl border bg-muted px-4 py-2 text-sm font-semibold">
-              Current
-            </span>
-            <span className="rounded-xl border px-4 py-2 text-sm font-semibold text-muted-foreground">
-              Archived
-            </span>
-            <span className="rounded-xl border px-4 py-2 text-sm font-semibold text-muted-foreground">
-              All
-            </span>
-          </div>
+        <div className="border-b p-5">
+          <h2 className="text-xl font-bold">Order List</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Manage order progress without horizontal scrolling.
+          </p>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1100px] text-sm">
-            <thead>
-              <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="px-5 py-4">Client</th>
-                <th className="px-5 py-4">Order Date</th>
-                <th className="px-5 py-4">Product</th>
-                <th className="px-5 py-4">Qty</th>
-                <th className="px-5 py-4">Sale Price</th>
-                <th className="px-5 py-4">Order Value</th>
-                <th className="px-5 py-4">PO</th>
-                <th className="px-5 py-4">Remarks</th>
-                <th className="px-5 py-4">Status</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {allOrders.map((order) => (
-                <tr key={order.id} className="border-b">
-                  <td className="px-5 py-4">
-                    <p className="font-semibold">{order.client_name}</p>
-                    <p className="mt-1 font-mono text-xs text-muted-foreground">
+        <div className="divide-y">
+          {allOrders.map((order) => (
+            <div key={order.id} className="p-5">
+              <div className="grid gap-5 xl:grid-cols-[1.2fr_1.4fr_0.8fr_1fr_1.15fr]">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-mono text-xs font-semibold text-muted-foreground">
                       {order.order_code}
                     </p>
-                  </td>
+                    <StatusPill label={order.status || "New"} />
+                  </div>
 
-                  <td className="px-5 py-4">{order.order_date || "—"}</td>
+                  <h3 className="mt-2 text-base font-bold">
+                    {order.client_name}
+                  </h3>
 
-                  <td className="px-5 py-4">{order.product_name}</td>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Date: {order.order_date || "—"}
+                  </p>
+                </div>
 
-                  <td className="px-5 py-4">{order.quantity}</td>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Product
+                  </p>
+                  <p className="mt-1 font-semibold">{order.product_name}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Qty: {order.quantity || 0}
+                  </p>
+                </div>
 
-                  <td className="px-5 py-4">
-                    {formatCurrency(Number(order.sale_price || 0))}
-                  </td>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Value
+                  </p>
+                  <p className="mt-1 font-semibold">
+                    {formatCurrency(order.order_value)}
+                  </p>
+                </div>
 
-                  <td className="px-5 py-4 font-semibold">
-                    {formatCurrency(Number(order.order_value || 0))}
-                  </td>
-
-                  <td className="px-5 py-4">
-                    {order.po_url ? (
-                      <a
-                        href={order.po_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-semibold text-blue-600 hover:underline"
-                      >
-                        Open
-                      </a>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </td>
-
-                  <td className="px-5 py-4 text-muted-foreground">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Remark
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
                     {order.remarks || "—"}
-                  </td>
+                  </p>
 
-                  <td className="px-5 py-4">
-                    <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold">
-                      {order.status}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+                  {order.po_url && (
+                    <a
+                      href={order.po_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 inline-block text-xs font-semibold text-blue-600 underline"
+                    >
+                      View PO
+                    </a>
+                  )}
+                </div>
 
-              {allOrders.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={9}
-                    className="px-5 py-10 text-center text-muted-foreground"
-                  >
-                    No orders found.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                <div className="flex justify-start xl:justify-end">
+                  <OrderActions
+                    orderId={order.id}
+                    orderCode={order.order_code}
+                    currentStatus={order.status || "New"}
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {allOrders.length === 0 && (
+            <div className="p-10 text-center text-muted-foreground">
+              No orders found.
+            </div>
+          )}
         </div>
       </section>
     </div>
