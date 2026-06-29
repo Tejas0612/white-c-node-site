@@ -1,23 +1,67 @@
+import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
 import { supabaseAdmin } from "@/lib/supabase-admin"
-import { ADMIN_SESSION_COOKIE } from "@/lib/admin-auth"
 
-export const runtime = "nodejs"
+const possibleSessionCookieNames = [
+  "admin_session",
+  "admin_session_token",
+  "whitec_admin_session",
+  "whitec_admin_session_token",
+]
 
-export async function POST() {
+async function clearAdminSession() {
   const cookieStore = await cookies()
-  const sessionToken = cookieStore.get(ADMIN_SESSION_COOKIE)?.value
 
-  if (sessionToken) {
-    await supabaseAdmin
-      .from("admin_sessions")
-      .delete()
-      .eq("session_token", sessionToken)
+  for (const cookieName of possibleSessionCookieNames) {
+    const sessionToken = cookieStore.get(cookieName)?.value
+
+    if (sessionToken) {
+      await supabaseAdmin
+        .from("admin_sessions")
+        .delete()
+        .eq("session_token", sessionToken)
+    }
+
+    cookieStore.delete(cookieName)
+  }
+}
+
+export async function POST(request: Request) {
+  await clearAdminSession()
+
+  const response = NextResponse.redirect(new URL("/admin/login", request.url), {
+    status: 303,
+  })
+
+  for (const cookieName of possibleSessionCookieNames) {
+    response.cookies.set(cookieName, "", {
+      path: "/",
+      maxAge: 0,
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+    })
   }
 
-  cookieStore.delete(ADMIN_SESSION_COOKIE)
+  return response
+}
 
-  return Response.json({
-    success: true,
+export async function GET(request: Request) {
+  await clearAdminSession()
+
+  const response = NextResponse.redirect(new URL("/admin/login", request.url), {
+    status: 303,
   })
+
+  for (const cookieName of possibleSessionCookieNames) {
+    response.cookies.set(cookieName, "", {
+      path: "/",
+      maxAge: 0,
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+    })
+  }
+
+  return response
 }

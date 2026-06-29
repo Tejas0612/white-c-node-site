@@ -24,10 +24,13 @@ export async function AdminShell({
           </div>
 
           <form action="/api/admin/logout" method="post">
-            <button className="rounded-xl border px-4 py-2 text-sm font-semibold hover:bg-muted">
-              Logout
+            <button
+                type="submit"
+                className="rounded-xl border px-4 py-2 text-sm font-semibold hover:bg-muted"
+            >
+                Logout
             </button>
-          </form>
+            </form>
         </header>
 
         <div className="min-w-0 p-6">{children}</div>
