@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin"
 import {
   AddStockItemButton,
   EditStockItemButton,
+  UploadStockCsvButton,
 } from "./stock-actions"
 
 export const dynamic = "force-dynamic"
@@ -74,7 +75,10 @@ export default async function StockReportPage() {
           </p>
         </div>
 
-        <AddStockItemButton />
+        <div className="flex flex-wrap gap-3">
+            <UploadStockCsvButton />
+            <AddStockItemButton />
+        </div>
       </div>
 
       {error && (
