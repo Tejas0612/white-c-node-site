@@ -30,6 +30,21 @@ function formatCurrency(value: number | string | null | undefined) {
   }).format(numberValue)
 }
 
+function formatRateCurrency(value: number | string | null | undefined) {
+  const numberValue = Number(value || 0)
+
+  if (!numberValue) {
+    return "₹0.00"
+  }
+
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(numberValue)
+}
+
 function getOrderValue(order: any) {
   return Number(order.order_value || 0)
 }
@@ -397,11 +412,11 @@ export default async function WorkflowOrdersPage({
                   </p>
 
                   <p className="mt-1 text-lg font-bold">
-                    {formatCurrency(order.order_value)}
+                    {formatRateCurrency(order.order_value)}
                   </p>
 
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Rate: {formatCurrency(order.sale_price)}
+                    Rate: {formatRateCurrency(order.sale_price)}
                   </p>
                 </div>
 

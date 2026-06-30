@@ -14,9 +14,9 @@ export async function createWorkflowOrder(formData: FormData) {
 
   const clientName = String(formData.get("client_name") || "").trim()
   const productName = String(formData.get("product_name") || "").trim()
-  const quantity = Number(formData.get("quantity") || 1)
-  const salePrice = Number(formData.get("sale_price") || 0)
-  const orderValueFromForm = Number(formData.get("order_value") || 0)
+  const quantity = Number(String(formData.get("quantity") || "1").replace(/,/g, ""))
+  const salePrice = Number(String(formData.get("sale_price") || "0").replace(/,/g, ""))
+  const orderValueFromForm = Number(String(formData.get("order_value") || "0").replace(/,/g, ""))
   const orderDate = String(formData.get("order_date") || "").trim()
   const poUrl = String(formData.get("po_url") || "").trim()
   const remarks = String(formData.get("remarks") || "").trim()
@@ -31,16 +31,20 @@ export async function createWorkflowOrder(formData: FormData) {
   }
 
   const cleanQuantity = quantity > 0 ? quantity : 1
+  const cleanSalePrice = salePrice > 0 ? salePrice : 0
+
   const orderValue =
-    orderValueFromForm > 0 ? orderValueFromForm : cleanQuantity * salePrice
+    orderValueFromForm > 0
+      ? Number(orderValueFromForm.toFixed(2))
+      : Number((cleanQuantity * cleanSalePrice).toFixed(2))
 
   const { error } = await supabaseAdmin.from("workflow_orders").insert({
     order_code: generateOrderCode(),
     client_name: clientName,
     product_name: productName,
     quantity: cleanQuantity,
-    sale_price: salePrice || 0,
-    order_value: orderValue || 0,
+    sale_price: salePrice || 0.0,
+    order_value: orderValue || 0.0,
     order_date: orderDate || new Date().toISOString().slice(0, 10),
     po_url: poUrl || null,
     remarks: remarks || null,
@@ -141,8 +145,9 @@ export async function updateWorkflowOrderDetails(formData: FormData) {
   const orderId = String(formData.get("order_id") || "").trim()
   const clientName = String(formData.get("client_name") || "").trim()
   const productName = String(formData.get("product_name") || "").trim()
-  const quantity = Number(formData.get("quantity") || 1)
-  const salePrice = Number(formData.get("sale_price") || 0)
+  const quantity = Number(String(formData.get("quantity") || "1").replace(/,/g, ""))
+  const salePrice = Number(String(formData.get("sale_price") || "0").replace(/,/g, ""))
+  const orderValueFromForm = Number(String(formData.get("order_value") || "0").replace(/,/g, ""))
   const orderDate = String(formData.get("order_date") || "").trim()
   const poUrl = String(formData.get("po_url") || "").trim()
   const status = String(formData.get("status") || "").trim()
@@ -162,7 +167,10 @@ export async function updateWorkflowOrderDetails(formData: FormData) {
 
   const cleanQuantity = quantity > 0 ? quantity : 1
   const cleanSalePrice = salePrice > 0 ? salePrice : 0
-  const orderValue = cleanQuantity * cleanSalePrice
+  const orderValue =
+    orderValueFromForm > 0
+      ? Number(orderValueFromForm.toFixed(2))
+      : Number((cleanQuantity * cleanSalePrice).toFixed(2))
 
   const { error } = await supabaseAdmin
     .from("workflow_orders")

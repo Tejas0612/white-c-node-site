@@ -105,9 +105,11 @@ export function EditOrderButton({ order }: { order: Order }) {
                   <input
                     type="number"
                     name="sale_price"
-                    min="0"
                     step="0.01"
-                    defaultValue={order.sale_price || 0}
+                    min="0"
+                    inputMode="decimal"
+                    defaultValue={order.sale_price || ""}
+                    placeholder="Example: 465.50"
                     className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
                   />
                 </div>
