@@ -1,214 +1,280 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { Resend } from "resend"
-import { supabaseAdmin } from "@/lib/supabase-admin"
 import { requireAdminUser } from "@/lib/admin-auth"
-
-const resend = process.env.RESEND_API_KEY
-  ? new Resend(process.env.RESEND_API_KEY)
-  : null
+import { supabaseAdmin } from "@/lib/supabase-admin"
 
 function generateEnquiryCode() {
   const randomPart = Math.random().toString(16).slice(2, 10).toUpperCase()
   return `ENQ-${randomPart}`
 }
 
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(value)
+function cleanText(value: FormDataEntryValue | string | null) {
+  return String(value || "").trim()
 }
 
-async function sendEnquiryEmails({
+function cleanNumber(value: FormDataEntryValue | string | null) {
+  const cleaned = String(value || "")
+    .replace(/₹/g, "")
+    .replace(/,/g, "")
+    .trim()
+
+  const numberValue = Number(cleaned)
+  return Number.isFinite(numberValue) ? numberValue : 0
+}
+
+function cleanPhone(phone: string) {
+  return String(phone || "").replace(/[^\d]/g, "")
+}
+
+function cleanTemplateText(value: string) {
+  return String(value || "")
+    .replace(/[\n\r\t]/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+}
+
+function getWhatsAppConfig() {
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN
+  const apiVersion = process.env.WHATSAPP_API_VERSION || "v21.0"
+  const templateName = process.env.WHATSAPP_ENQUIRY_TEMPLATE_NAME
+  const languageCode = process.env.WHATSAPP_TEMPLATE_LANGUAGE || "en_US"
+
+  if (!phoneNumberId || !accessToken || !templateName) {
+    return null
+  }
+
+  return {
+    phoneNumberId,
+    accessToken,
+    apiVersion,
+    templateName,
+    languageCode,
+  }
+}
+
+async function sendAutomaticEnquiryWhatsApp({
+  enquiryId,
   enquiryCode,
   clientName,
-  clientEmail,
   clientPhone,
   productNames,
-  tentativeQuantity,
-  approxCost,
-  remarks,
-  proposalStatus,
-  successProbability,
 }: {
+  enquiryId: string
   enquiryCode: string
   clientName: string
-  clientEmail: string | null
-  clientPhone: string | null
-  productNames: string | null
-  tentativeQuantity: number | null
-  approxCost: number
-  remarks: string | null
-  proposalStatus: string
-  successProbability: number
+  clientPhone: string
+  productNames: string
 }) {
-  if (!resend || !process.env.RESEND_FROM_EMAIL) {
+  const config = getWhatsAppConfig()
+
+  if (!config) {
     return
   }
 
-  const adminEmail = process.env.INQUIRY_RECEIVER_EMAIL
+  const toPhone = cleanPhone(clientPhone)
 
-  if (adminEmail) {
-    await resend.emails.send({
-      from: process.env.RESEND_FROM_EMAIL,
-      to: adminEmail,
-      subject: `New White C enquiry: ${clientName} (${enquiryCode})`,
-      html: `
-        <div style="font-family: Arial, sans-serif; line-height: 1.6;">
-          <h2>New enquiry received</h2>
-          <p><strong>Enquiry Code:</strong> ${enquiryCode}</p>
-          <p><strong>Client:</strong> ${clientName}</p>
-          <p><strong>Phone:</strong> ${clientPhone || "-"}</p>
-          <p><strong>Email:</strong> ${clientEmail || "-"}</p>
-          <p><strong>Product(s):</strong> ${productNames || "-"}</p>
-          <p><strong>Tentative Qty:</strong> ${tentativeQuantity || "-"}</p>
-          <p><strong>Approx Value:</strong> ${formatCurrency(approxCost || 0)}</p>
-          <p><strong>Proposal Status:</strong> ${proposalStatus}</p>
-          <p><strong>Success Probability:</strong> ${successProbability}%</p>
-          <p><strong>Remarks:</strong><br/>${remarks || "-"}</p>
-          <hr/>
-          <p>Please prepare proposal/PPT draft for approval before sharing with client.</p>
-        </div>
-      `,
-    })
+  if (!toPhone) {
+    return
   }
 
-  if (clientEmail) {
-    await resend.emails.send({
-      from: process.env.RESEND_FROM_EMAIL,
-      to: clientEmail,
-      subject: `We received your gifting enquiry - White C`,
-      html: `
-        <div style="font-family: Arial, sans-serif; line-height: 1.6;">
-          <p>Hi ${clientName},</p>
-          <p>Thank you for reaching out to White C.</p>
-          <p>We have received your gifting enquiry and our team is reviewing the requirement.</p>
-          <p>We will get back to you shortly with suitable options and next steps.</p>
-          <p><strong>Reference:</strong> ${enquiryCode}</p>
-          <p>Regards,<br/>White C Team</p>
-        </div>
-      `,
-    })
+  const finalClientName = cleanTemplateText(clientName || "there")
+  const finalProductNames = cleanTemplateText(productNames || "your requirement")
+  const finalEnquiryCode = cleanTemplateText(enquiryCode)
+
+  const messageText = `Hi ${finalClientName}, this is White C.
+
+We have received your gifting enquiry for ${finalProductNames}.
+
+Our team is reviewing it and will get back to you shortly.
+
+Reference: ${finalEnquiryCode}`
+
+  const url = `https://graph.facebook.com/${config.apiVersion}/${config.phoneNumberId}/messages`
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to: toPhone,
+    type: "template",
+    template: {
+      name: config.templateName,
+      language: {
+        code: config.languageCode,
+      },
+      components: [
+        {
+          type: "body",
+          parameters: [
+            {
+              type: "text",
+              text: finalClientName,
+            },
+            {
+              type: "text",
+              text: finalProductNames,
+            },
+            {
+              type: "text",
+              text: finalEnquiryCode,
+            },
+          ],
+        },
+      ],
+    },
   }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  })
+
+  const responseJson = await response.json()
+
+  await supabaseAdmin.from("whatsapp_outbound_messages").insert({
+    enquiry_id: enquiryId,
+    to_phone: toPhone,
+    message_type: "automatic_enquiry_received",
+    message_text: messageText,
+    whatsapp_message_id: responseJson?.messages?.[0]?.id || null,
+    send_status: response.ok ? "Sent" : "Failed",
+    error_message: response.ok ? null : JSON.stringify(responseJson),
+    raw_response: responseJson,
+  })
 }
 
 export async function createWorkflowEnquiry(formData: FormData) {
-  await requireAdminUser(["Sales", "Operations"])
+  await requireAdminUser(["Admin", "Owner", "Sales", "Operations"])
 
-  const enquiryCode = generateEnquiryCode()
-
-  const clientName = String(formData.get("client_name") || "").trim()
-  const productNames = String(formData.get("product_names") || "").trim()
-  const tentativeQuantity = Number(formData.get("tentative_quantity") || 0)
-  const approxCost = Number(formData.get("approx_cost") || 0)
-  const enquiryDate = String(formData.get("enquiry_date") || "").trim()
-  const clientPhone = String(formData.get("client_phone") || "").trim()
-  const clientEmail = String(formData.get("client_email") || "").trim()
-  const status = String(formData.get("status") || "New").trim()
-  const remarks = String(formData.get("remarks") || "").trim()
-  const assignedTo = String(formData.get("assigned_to") || "").trim()
-  const successProbability = Number(formData.get("success_probability") || 10)
-  const proposalStatus = String(
-    formData.get("proposal_status") || "Draft Needed"
-  ).trim()
-  const clientResponseStatus = String(
-    formData.get("client_response_status") || "No Response Yet"
-  ).trim()
-  const poStatus = String(formData.get("po_status") || "Not Received").trim()
-  const nextFollowUpDate = String(formData.get("next_follow_up_date") || "").trim()
+  const clientName = cleanText(formData.get("client_name"))
+  const productNames = cleanText(formData.get("product_names"))
+  const tentativeQuantity = cleanNumber(formData.get("tentative_quantity"))
+  const approxCost = cleanNumber(formData.get("approx_cost"))
+  const enquiryDate = cleanText(formData.get("enquiry_date"))
+  const clientPhone = cleanText(formData.get("client_phone"))
+  const clientEmail = cleanText(formData.get("client_email"))
+  const status = cleanText(formData.get("status")) || "New"
+  const remarks = cleanText(formData.get("remarks"))
+  const assignedTo = cleanText(formData.get("assigned_to"))
+  const successProbability =
+    cleanNumber(formData.get("success_probability")) || 10
+  const proposalStatus =
+    cleanText(formData.get("proposal_status")) || "Draft Needed"
+  const clientResponseStatus =
+    cleanText(formData.get("client_response_status")) || "No Response Yet"
+  const poStatus = cleanText(formData.get("po_status")) || "Not Received"
+  const convertedToOrder =
+    String(formData.get("converted_to_order") || "false") === "true"
+  const nextFollowUpDate = cleanText(formData.get("next_follow_up_date"))
 
   if (!clientName) {
     throw new Error("Client name is required.")
   }
 
-  const { error } = await supabaseAdmin.from("workflow_enquiries").insert({
-    enquiry_code: enquiryCode,
-    client_name: clientName,
-    product_names: productNames || null,
-    tentative_quantity: tentativeQuantity || null,
-    approx_cost: approxCost || 0,
-    enquiry_date: enquiryDate || new Date().toISOString().slice(0, 10),
-    client_phone: clientPhone || null,
-    client_email: clientEmail || null,
-    status: status || "New",
-    remarks: remarks || null,
-    source: "Admin",
-    assigned_to: assignedTo || null,
-    success_probability: successProbability,
-    proposal_status: proposalStatus,
-    client_response_status: clientResponseStatus,
-    po_status: poStatus,
-    converted_to_order: status === "Won",
-    next_follow_up_date: nextFollowUpDate || null,
-  })
+  const { data: createdEnquiry, error } = await supabaseAdmin
+    .from("workflow_enquiries")
+    .insert({
+      enquiry_code: generateEnquiryCode(),
+      client_name: clientName,
+      product_names: productNames || null,
+      tentative_quantity: tentativeQuantity || null,
+      approx_cost: approxCost || null,
+      enquiry_date: enquiryDate || new Date().toISOString().slice(0, 10),
+      client_phone: clientPhone || null,
+      client_email: clientEmail || null,
+      status,
+      remarks: remarks || null,
+      source: "Admin",
+      assigned_to: assignedTo || null,
+      success_probability: successProbability,
+      proposal_status: proposalStatus,
+      client_response_status: clientResponseStatus,
+      po_status: poStatus,
+      converted_to_order: convertedToOrder,
+      next_follow_up_date: nextFollowUpDate || null,
+    })
+    .select("id, enquiry_code, client_name, client_phone, product_names")
+    .single()
 
   if (error) {
     throw new Error(error.message)
   }
 
-  try {
-    await sendEnquiryEmails({
-      enquiryCode,
-      clientName,
-      clientEmail: clientEmail || null,
-      clientPhone: clientPhone || null,
-      productNames: productNames || null,
-      tentativeQuantity: tentativeQuantity || null,
-      approxCost,
-      remarks: remarks || null,
-      proposalStatus,
-      successProbability,
-    })
-  } catch (emailError) {
-    console.error("Enquiry email failed:", emailError)
+  if (createdEnquiry?.client_phone) {
+    try {
+      await sendAutomaticEnquiryWhatsApp({
+        enquiryId: createdEnquiry.id,
+        enquiryCode: createdEnquiry.enquiry_code,
+        clientName: createdEnquiry.client_name || "there",
+        clientPhone: createdEnquiry.client_phone,
+        productNames: createdEnquiry.product_names || "your requirement",
+      })
+    } catch (whatsappError) {
+      console.error("Automatic enquiry WhatsApp failed:", whatsappError)
+    }
   }
 
   revalidatePath("/admin/workflow/enquiries")
   revalidatePath("/admin/workflow")
 }
 
-export async function updateWorkflowEnquiryRemark({
-  enquiryId,
-  remark,
-  status,
-  successProbability,
-  proposalStatus,
-  clientResponseStatus,
-  poStatus,
-}: {
-  enquiryId: string
-  remark: string
-  status: string
-  successProbability: number
-  proposalStatus: string
-  clientResponseStatus: string
-  poStatus: string
-}) {
-  await requireAdminUser(["Sales", "Operations"])
+export async function updateWorkflowEnquiryTracking(formData: FormData) {
+  await requireAdminUser(["Admin", "Owner", "Sales", "Operations"])
 
-  const cleanRemark = String(remark || "").trim()
+  const enquiryId = cleanText(formData.get("enquiry_id"))
+  const status = cleanText(formData.get("status")) || "New"
+  const successProbability =
+    cleanNumber(formData.get("success_probability")) || 0
+  const proposalStatus = cleanText(formData.get("proposal_status"))
+  const clientResponseStatus = cleanText(formData.get("client_response_status"))
+  const poStatus = cleanText(formData.get("po_status"))
 
   if (!enquiryId) {
     throw new Error("Enquiry ID is required.")
   }
 
-  if (!cleanRemark) {
+  const { error } = await supabaseAdmin
+    .from("workflow_enquiries")
+    .update({
+      status,
+      success_probability: successProbability,
+      proposal_status: proposalStatus || null,
+      client_response_status: clientResponseStatus || null,
+      po_status: poStatus || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", enquiryId)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  revalidatePath("/admin/workflow/enquiries")
+  revalidatePath("/admin/workflow")
+}
+
+export async function updateWorkflowEnquiryRemark(formData: FormData) {
+  await requireAdminUser(["Admin", "Owner", "Sales", "Operations"])
+
+  const enquiryId = cleanText(formData.get("enquiry_id"))
+  const remark = cleanText(formData.get("remark"))
+
+  if (!enquiryId) {
+    throw new Error("Enquiry ID is required.")
+  }
+
+  if (!remark) {
     throw new Error("Remark is required.")
   }
 
   const { error } = await supabaseAdmin
     .from("workflow_enquiries")
     .update({
-      remarks: cleanRemark,
-      status: status || "In Progress",
-      success_probability: successProbability,
-      proposal_status: proposalStatus || "Draft Needed",
-      client_response_status: clientResponseStatus || "No Response Yet",
-      po_status: poStatus || "Not Received",
-      converted_to_order: status === "Won",
+      remarks: remark,
       last_client_interaction_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
@@ -222,26 +288,27 @@ export async function updateWorkflowEnquiryRemark({
   revalidatePath("/admin/workflow")
 }
 
-
 export async function updateWorkflowEnquiryDetails(formData: FormData) {
   await requireAdminUser(["Admin", "Owner"])
 
-  const enquiryId = String(formData.get("enquiry_id") || "").trim()
-  const clientName = String(formData.get("client_name") || "").trim()
-  const productNames = String(formData.get("product_names") || "").trim()
-  const tentativeQuantity = Number(formData.get("tentative_quantity") || 0)
-  const approxCost = Number(formData.get("approx_cost") || 0)
-  const clientPhone = String(formData.get("client_phone") || "").trim()
-  const clientEmail = String(formData.get("client_email") || "").trim()
-  const status = String(formData.get("status") || "").trim()
-  const remarks = String(formData.get("remarks") || "").trim()
-  const assignedTo = String(formData.get("assigned_to") || "").trim()
-  const successProbability = Number(formData.get("success_probability") || 0)
-  const proposalStatus = String(formData.get("proposal_status") || "").trim()
-  const clientResponseStatus = String(formData.get("client_response_status") || "").trim()
-  const poStatus = String(formData.get("po_status") || "").trim()
-  const convertedToOrder = String(formData.get("converted_to_order") || "false") === "true"
-  const nextFollowUpDate = String(formData.get("next_follow_up_date") || "").trim()
+  const enquiryId = cleanText(formData.get("enquiry_id"))
+  const clientName = cleanText(formData.get("client_name"))
+  const productNames = cleanText(formData.get("product_names"))
+  const tentativeQuantity = cleanNumber(formData.get("tentative_quantity"))
+  const approxCost = cleanNumber(formData.get("approx_cost"))
+  const clientPhone = cleanText(formData.get("client_phone"))
+  const clientEmail = cleanText(formData.get("client_email"))
+  const status = cleanText(formData.get("status")) || "New"
+  const remarks = cleanText(formData.get("remarks"))
+  const assignedTo = cleanText(formData.get("assigned_to"))
+  const successProbability =
+    cleanNumber(formData.get("success_probability")) || 0
+  const proposalStatus = cleanText(formData.get("proposal_status"))
+  const clientResponseStatus = cleanText(formData.get("client_response_status"))
+  const poStatus = cleanText(formData.get("po_status"))
+  const convertedToOrder =
+    String(formData.get("converted_to_order") || "false") === "true"
+  const nextFollowUpDate = cleanText(formData.get("next_follow_up_date"))
 
   if (!enquiryId) {
     throw new Error("Enquiry ID is required.")
@@ -260,7 +327,7 @@ export async function updateWorkflowEnquiryDetails(formData: FormData) {
       approx_cost: approxCost || null,
       client_phone: clientPhone || null,
       client_email: clientEmail || null,
-      status: status || "New",
+      status,
       remarks: remarks || null,
       assigned_to: assignedTo || null,
       success_probability: successProbability || null,

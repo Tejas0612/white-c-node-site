@@ -101,7 +101,9 @@ export function CreateOrderModal() {
                     type="number"
                     name="sale_price"
                     min="0"
-                    defaultValue="0"
+                    step="0.01"
+                    inputMode="decimal"
+                    defaultValue={0}
                     className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
                   />
                   <p className="mt-1 text-xs text-muted-foreground">

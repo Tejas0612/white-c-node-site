@@ -4,6 +4,7 @@ import { isAdminOrOwner } from "@/lib/admin-role-utils"
 import { CreateOrderModal } from "./create-order-modal"
 import { OrderActions } from "./order-actions"
 import { EditOrderButton } from "./edit-order-button"
+import { StatusFilterBar } from "@/components/admin/status-filter-bar"
 
 export const dynamic = "force-dynamic"
 
@@ -24,7 +25,11 @@ function StatusPill({ label }: { label: string }) {
   )
 }
 
-export default async function WorkflowOrdersPage() {
+export default async function WorkflowOrdersPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ status?: string }>
+}) {
 
   const user = await requireAdminUser([
     "Admin",
@@ -35,13 +40,32 @@ export default async function WorkflowOrdersPage() {
     ])
 
   const canEdit = isAdminOrOwner(user)
+
+  const params = searchParams ? await searchParams : {}
+  const statusFilter = params?.status || "All"
+
+  const orderStatuses = [
+    "All",
+    "New",
+    "In Progress",
+    "Dispatched",
+    "Delivered",
+    "Cancelled",
+  ]  
   
   const { data: orders, error } = await supabaseAdmin
     .from("workflow_orders")
     .select("*")
     .order("created_at", { ascending: false })
 
-  const allOrders = orders || []
+  const allOrdersRaw = orders || []
+
+  const allOrders =
+    statusFilter === "All"
+      ? allOrdersRaw
+      : allOrdersRaw.filter(
+          (order) => (order.status || "New") === statusFilter
+        )
 
   const totalValue = allOrders.reduce(
     (sum, order) => sum + Number(order.order_value || 0),
@@ -105,6 +129,11 @@ export default async function WorkflowOrdersPage() {
 
       <section className="mt-8 rounded-2xl border bg-background">
         <div className="border-b p-5">
+          <StatusFilterBar
+            basePath="/admin/workflow/orders"
+            currentStatus={statusFilter}
+            statuses={orderStatuses}
+          />
           <h2 className="text-xl font-bold">Order List</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Manage order progress without horizontal scrolling.

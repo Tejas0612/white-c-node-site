@@ -1,241 +1,257 @@
 import { NextResponse } from "next/server"
-import { supabaseAdmin } from "@/lib/supabase-admin"
 import { requireAdminUser } from "@/lib/admin-auth"
-import {
-  cleanWhatsAppPhone,
-  sendWhatsAppTemplateMessage,
-  sendWhatsAppTextMessage,
-} from "@/lib/whatsapp-cloud"
+import { supabaseAdmin } from "@/lib/supabase-admin"
 
-export const dynamic = "force-dynamic"
-
-type SendTaskReminderRequest = {
-  mode?: "single" | "pending"
-  taskId?: string
+function cleanPhone(phone: string) {
+  return String(phone || "").replace(/[^\d]/g, "")
 }
 
-function buildTaskReminderText(task: any) {
-  const assigneeName = task.workflow_team_members?.name || "Team"
-  const taskCode = task.task_code || "-"
-  const title = task.title || "-"
-  const dueDate = task.due_date || "Not set"
+function cleanTemplateText(value: string) {
+      return String(value || "")
+        .replace(/[\n\r\t]/g, " ")
+        .replace(/\s{2,}/g, " ")
+        .trim()
+}
 
+function getWhatsAppConfig() {
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN
+  const apiVersion = process.env.WHATSAPP_API_VERSION || "v21.0"
+  const templateName = process.env.WHATSAPP_TASK_TEMPLATE_NAME
+  const languageCode = process.env.WHATSAPP_TEMPLATE_LANGUAGE || "en_US"
+
+  if (!phoneNumberId) {
+    throw new Error("WHATSAPP_PHONE_NUMBER_ID is missing.")
+  }
+
+  if (!accessToken) {
+    throw new Error("WHATSAPP_ACCESS_TOKEN is missing.")
+  }
+
+  return {
+    phoneNumberId,
+    accessToken,
+    apiVersion,
+    templateName,
+    languageCode,
+  }
+}
+
+function buildTaskText({
+  assigneeName,
+  taskCode,
+  taskTitle,
+  taskDescription,
+  dueDate,
+}: {
+  assigneeName: string
+  taskCode: string
+  taskTitle: string
+  taskDescription: string
+  dueDate: string
+}) {
   return `Hi ${assigneeName}, this is a White C task reminder.
 
 Task Code: ${taskCode}
-Task: ${title}
+Task: ${taskTitle}
+Description: ${taskDescription || "—"}
 Due Date: ${dueDate}
 
-Please reply:
+Please reply with:
 DONE ${taskCode}
 or
-REMARK ${taskCode} your update here`
+REMARK ${taskCode} your update.`
 }
 
-async function logOutboundMessage({
-  taskId,
+async function sendWhatsAppTaskReminder({
+  task,
+  assigneeName,
   toPhone,
-  messageText,
-  result,
 }: {
-  taskId: string | null
+  task: any
+  assigneeName: string
   toPhone: string
-  messageText: string
-  result: any
 }) {
-  const { error } = await supabaseAdmin.from("whatsapp_outbound_messages").insert({
-    task_id: taskId,
+  const {
+    phoneNumberId,
+    accessToken,
+    apiVersion,
+    templateName,
+    languageCode,
+  } = getWhatsAppConfig()
+
+  const taskCode = cleanTemplateText(task.task_code || "")
+  const taskTitle = cleanTemplateText(task.title || "")
+  const taskDescription = cleanTemplateText(task.description || "")
+  const dueDate = cleanTemplateText(task.due_date || "Not set")
+
+  const messageText = buildTaskText({
+    assigneeName,
+    taskCode,
+    taskTitle,
+    taskDescription,
+    dueDate,
+  })
+
+  const url = `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`
+
+  const payload = templateName
+    ? {
+        messaging_product: "whatsapp",
+        to: toPhone,
+        type: "template",
+        template: {
+          name: templateName,
+          language: {
+            code: languageCode,
+          },
+          components: [
+            {
+              type: "body",
+              parameters: [
+                {
+                  type: "text",
+                  text: cleanTemplateText(assigneeName),
+                },
+                {
+                  type: "text",
+                  text: taskCode,
+                },
+                {
+                  type: "text",
+                  text: taskTitle || "—",
+                },
+                {
+                  type: "text",
+                  text: taskDescription || "—",
+                },
+                {
+                  type: "text",
+                  text: dueDate,
+                },
+              ],
+            },
+          ],
+        },
+      }
+    : {
+        messaging_product: "whatsapp",
+        to: toPhone,
+        type: "text",
+        text: {
+          preview_url: false,
+          body: messageText,
+        },
+      }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  })
+
+  const responseJson = await response.json()
+
+  await supabaseAdmin.from("whatsapp_outbound_messages").insert({
+    task_id: task.id,
     to_phone: toPhone,
-    message_type: "task_reminder",
+    message_type: templateName ? "task_reminder_template" : "task_reminder_text",
     message_text: messageText,
-    whatsapp_message_id: result.whatsappMessageId || null,
-    send_status: result.success ? "Sent" : "Failed",
-    error_message: result.success ? null : result.error || "Failed",
-    raw_response: result.response || null,
+    whatsapp_message_id: responseJson?.messages?.[0]?.id || null,
+    send_status: response.ok ? "Sent" : "Failed",
+    error_message: response.ok ? null : JSON.stringify(responseJson),
+    raw_response: responseJson,
   })
 
-  if (error) {
-    console.error("WhatsApp outbound log failed:", error)
-  }
-}
-
-async function sendTaskReminder(task: any) {
-  const toPhone = cleanWhatsAppPhone(task.workflow_team_members?.whatsapp)
-  const messageText = buildTaskReminderText(task)
-  const templateName = process.env.WHATSAPP_TASK_TEMPLATE_NAME
-
-  if (!toPhone) {
-    const result = {
-      success: false,
-      error: "Assignee WhatsApp number is missing.",
-    }
-
-    await logOutboundMessage({
-      taskId: task.id,
-      toPhone: "",
-      messageText,
-      result,
-    })
-
-    return {
-      taskId: task.id,
-      taskCode: task.task_code,
-      to: "",
-      ...result,
-    }
+  if (!response.ok) {
+    throw new Error(
+      responseJson?.error?.message || "Failed to send WhatsApp task reminder."
+    )
   }
 
-  const result = templateName
-    ? await sendWhatsAppTemplateMessage({
-        to: toPhone,
-        templateName,
-        bodyVariables: [
-          task.workflow_team_members?.name || "Team",
-          task.task_code || "-",
-          task.title || "-",
-          task.due_date || "Not set",
-        ],
-      })
-    : await sendWhatsAppTextMessage({
-        to: toPhone,
-        message: messageText,
-      })
-
-  await logOutboundMessage({
-    taskId: task.id,
-    toPhone,
-    messageText,
-    result,
-  })
-
-  return {
-    taskId: task.id,
-    taskCode: task.task_code,
-    to: toPhone,
-    ...result,
-  }
+  return responseJson
 }
 
 export async function POST(request: Request) {
   try {
-    await requireAdminUser(["Operations", "Sales", "Accounts"])
+    await requireAdminUser([
+      "Admin",
+      "Owner",
+      "Operations",
+      "Sales",
+      "Accounts",
+    ])
 
-    const body = (await request.json()) as SendTaskReminderRequest
-    const mode = body.mode || "single"
+    const body = await request.json()
+    const taskId = String(body.taskId || "").trim()
 
-    let query = supabaseAdmin
+    if (!taskId) {
+      throw new Error("Task ID is required.")
+    }
+
+    const { data: task, error } = await supabaseAdmin
       .from("workflow_tasks")
       .select(
         `
-        *,
+        id,
+        task_code,
+        title,
+        description,
+        due_date,
+        status,
         workflow_team_members (
           name,
           whatsapp
         )
       `
       )
+      .eq("id", taskId)
+      .single()
 
-    if (mode === "single") {
-      if (!body.taskId) {
-        return NextResponse.json(
-          {
-            success: false,
-            message: "Task ID is required.",
-          },
-          { status: 400 }
-        )
-      }
-
-      query = query.eq("id", body.taskId).limit(1)
-    } else {
-      query = query.eq("status", "Pending")
+    if (error || !task) {
+      throw new Error(error?.message || "Task not found.")
     }
 
-    const { data: tasks, error } = await query
-
-    if (error) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: error.message,
-        },
-        { status: 500 }
-      )
+    if (task.status === "Done") {
+      throw new Error("Reminder cannot be sent for a completed task.")
     }
 
-    const allTasks = tasks || []
+    const assignee = Array.isArray(task.workflow_team_members)
+      ? task.workflow_team_members[0]
+      : task.workflow_team_members
 
-    if (allTasks.length === 0) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "No task found.",
-        },
-        { status: 404 }
-      )
+    if (!assignee?.whatsapp) {
+      throw new Error("Assignee WhatsApp number is missing.")
     }
 
-    if (mode === "single" && allTasks[0]?.status === "Done") {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Reminder is not sent for completed tasks.",
-        },
-        { status: 400 }
-      )
+    const toPhone = cleanPhone(assignee.whatsapp)
+
+    if (!toPhone) {
+      throw new Error("Assignee WhatsApp number is invalid.")
     }
 
-    const results = []
-
-    for (const task of allTasks) {
-      if (task.status === "Done") {
-        continue
-      }
-
-      const result = await sendTaskReminder(task)
-      results.push(result)
-    }
-
-    const sentCount = results.filter((result) => result.success).length
-    const failedCount = results.filter((result) => !result.success).length
-
-    if (mode === "single") {
-      const result = results[0]
-
-      if (!result?.success) {
-        return NextResponse.json(
-          {
-            success: false,
-            message: result?.error || "Failed to send reminder.",
-            to: result?.to || null,
-            result,
-          },
-          { status: 400 }
-        )
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: "Reminder sent.",
-        to: result.to,
-        whatsapp_message_id: result.whatsappMessageId || null,
-        result,
-      })
-    }
+    const result = await sendWhatsAppTaskReminder({
+      task,
+      assigneeName: assignee.name || "there",
+      toPhone,
+    })
 
     return NextResponse.json({
       success: true,
-      sent_count: sentCount,
-      failed_count: failedCount,
-      results,
+      result,
     })
   } catch (error: any) {
     return NextResponse.json(
       {
         success: false,
-        message: error?.message || "Failed to send task reminder.",
+        error: error?.message || "Failed to send task reminder.",
       },
-      { status: 500 }
+      {
+        status: 400,
+      }
     )
   }
 }
