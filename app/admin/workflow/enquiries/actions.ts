@@ -347,3 +347,29 @@ export async function updateWorkflowEnquiryDetails(formData: FormData) {
   revalidatePath("/admin/workflow/enquiries")
   revalidatePath("/admin/workflow")
 }
+
+export async function deleteWorkflowEnquiry({
+  enquiryId,
+}: {
+  enquiryId: string
+}) {
+  await requireAdminUser(["Owner"])
+
+  const cleanEnquiryId = String(enquiryId || "").trim()
+
+  if (!cleanEnquiryId) {
+    throw new Error("Enquiry ID is required.")
+  }
+
+  const { error } = await supabaseAdmin
+    .from("workflow_enquiries")
+    .delete()
+    .eq("id", cleanEnquiryId)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  revalidatePath("/admin/workflow/enquiries")
+  revalidatePath("/admin/workflow")
+}

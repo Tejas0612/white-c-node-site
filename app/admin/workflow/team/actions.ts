@@ -95,11 +95,12 @@ export async function updateWorkflowTeamMember(formData: FormData) {
 }
 
 export async function updateRoleAccessMatrix(formData: FormData) {
-  await requireAdminUser(["Admin"])
+  await requireAdminUser(["Owner"])
 
   const matrixId = String(formData.get("matrix_id") || "").trim()
   const allowedActions = String(formData.get("allowed_actions") || "").trim()
   const isVisible = String(formData.get("is_visible") || "true") === "true"
+
   const selectedRoles = getSelectedMatrixRoles(formData)
 
   if (!matrixId) {

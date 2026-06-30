@@ -1,11 +1,12 @@
 import { requireAdminUser } from "@/lib/admin-auth"
 import { supabaseAdmin } from "@/lib/supabase-admin"
-import { isAdminOrOwner } from "@/lib/admin-role-utils"
+import { isAdminOrOwner, isOwner } from "@/lib/admin-role-utils"
 import { StatusFilterBar } from "@/components/admin/status-filter-bar"
 import { CreateEnquiryModal } from "./create-enquiry-modal"
 import { EnquiryActions } from "./enquiry-actions"
 import { EditEnquiryButton } from "./edit-enquiry-button"
 import { ProposalButtons } from "./proposal-buttons"
+import { DeleteEnquiryButton } from "./delete-enquiry-button"
 
 export const dynamic = "force-dynamic"
 
@@ -29,10 +30,84 @@ function formatCurrency(value: number | null) {
   }).format(Number(value))
 }
 
+function buildPageHref({
+    statusFilter,
+    page,
+  }: {
+    statusFilter: string
+    page: number
+  }) {
+    if (statusFilter === "All") {
+      return `/admin/workflow/enquiries?page=${page}`
+    }
+
+    return `/admin/workflow/enquiries?status=${encodeURIComponent(
+      statusFilter
+    )}&page=${page}`
+  }
+
+  function TopPagination({
+    safeCurrentPage,
+    totalPages,
+    statusFilter,
+  }: {
+    safeCurrentPage: number
+    totalPages: number
+    statusFilter: string
+  }) {
+    if (totalPages <= 1) {
+      return null
+    }
+
+    return (
+      <div className="flex items-center gap-2 rounded-2xl border bg-muted/30 px-3 py-3">
+        <a
+          href={
+            safeCurrentPage <= 1
+              ? "#"
+              : buildPageHref({
+                  statusFilter,
+                  page: safeCurrentPage - 1,
+                })
+          }
+          className={
+            safeCurrentPage <= 1
+              ? "pointer-events-none rounded-xl border px-3 py-2 text-xs font-semibold text-muted-foreground opacity-50"
+              : "rounded-xl border px-3 py-2 text-xs font-semibold hover:bg-muted"
+          }
+        >
+          Prev
+        </a>
+
+        <span className="px-2 text-sm font-bold">
+          {safeCurrentPage} / {totalPages}
+        </span>
+
+        <a
+          href={
+            safeCurrentPage >= totalPages
+              ? "#"
+              : buildPageHref({
+                  statusFilter,
+                  page: safeCurrentPage + 1,
+                })
+          }
+          className={
+            safeCurrentPage >= totalPages
+              ? "pointer-events-none rounded-xl border px-3 py-2 text-xs font-semibold text-muted-foreground opacity-50"
+              : "rounded-xl border px-3 py-2 text-xs font-semibold hover:bg-muted"
+          }
+        >
+          Next
+        </a>
+      </div>
+    )
+  }
+
 export default async function WorkflowEnquiriesPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ status?: string }>
+  searchParams?: Promise<{ status?: string; page?: string }>
 }) {
   const user = await requireAdminUser([
     "Admin",
@@ -42,9 +117,12 @@ export default async function WorkflowEnquiriesPage({
   ])
 
   const canEdit = isAdminOrOwner(user)
+  const canDelete = isOwner(user)
 
   const params = searchParams ? await searchParams : {}
   const statusFilter = params?.status || "All"
+  const currentPage = Math.max(Number(params?.page || "1"), 1)
+  const pageSize = 10
 
   const enquiryStatuses = [
     "All",
@@ -69,12 +147,20 @@ export default async function WorkflowEnquiriesPage({
   const allTeamMembers = teamMembers || []
   const allEnquiriesRaw = enquiries || []
 
-  const allEnquiries =
+  const filteredEnquiries =
     statusFilter === "All"
       ? allEnquiriesRaw
       : allEnquiriesRaw.filter(
           (enquiry) => (enquiry.status || "New") === statusFilter
         )
+
+  const totalFilteredEnquiries = filteredEnquiries.length
+  const totalPages = Math.max(Math.ceil(totalFilteredEnquiries / pageSize), 1)
+  const safeCurrentPage = Math.min(currentPage, totalPages)
+  const startIndex = (safeCurrentPage - 1) * pageSize
+  const endIndex = startIndex + pageSize
+
+  const allEnquiries = filteredEnquiries.slice(startIndex, endIndex)
 
   const newCount = allEnquiriesRaw.filter(
     (enquiry) => (enquiry.status || "New") === "New"
@@ -161,10 +247,33 @@ export default async function WorkflowEnquiriesPage({
 
       <section className="rounded-2xl border bg-background">
         <div className="border-b p-5">
-          <h2 className="text-xl font-bold">Enquiry List</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Filtered by: {statusFilter}
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold">Enquiry List</h2>
+
+              <p className="mt-1 text-sm text-muted-foreground">
+                Filtered by: {statusFilter}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="rounded-2xl border bg-muted/30 px-4 py-3 text-right">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Showing
+                </p>
+
+                <p className="mt-1 text-sm font-bold">
+                  {allEnquiries.length} of {totalFilteredEnquiries} enquiries
+                </p>
+              </div>
+
+              <TopPagination
+                safeCurrentPage={safeCurrentPage}
+                totalPages={totalPages}
+                statusFilter={statusFilter}
+              />
+            </div>
+          </div>
         </div>
 
         <div className="divide-y">
@@ -302,6 +411,13 @@ export default async function WorkflowEnquiriesPage({
                       clientEmail={enquiry.client_email}
                       remarks={enquiry.remarks}
                     />
+
+                    {canDelete && (
+                      <DeleteEnquiryButton
+                        enquiryId={enquiry.id}
+                        enquiryCode={enquiry.enquiry_code}
+                      />
+                    )}
 
                     {canEdit && (
                       <EditEnquiryButton

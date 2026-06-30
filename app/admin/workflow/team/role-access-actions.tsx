@@ -4,6 +4,7 @@ import { useState, useTransition } from "react"
 import { updateRoleAccessMatrix } from "./actions"
 
 const roleOptions = [
+  "Owner",
   "Admin",
   "Operations",
   "Sales",

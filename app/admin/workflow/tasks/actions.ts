@@ -140,3 +140,29 @@ export async function updateWorkflowTaskDetails(formData: FormData) {
   revalidatePath("/admin/workflow/tasks")
   revalidatePath("/admin/workflow")
 }
+
+export async function deleteWorkflowTask({
+  taskId,
+}: {
+  taskId: string
+}) {
+  await requireAdminUser(["Owner"])
+
+  const cleanTaskId = String(taskId || "").trim()
+
+  if (!cleanTaskId) {
+    throw new Error("Task ID is required.")
+  }
+
+  const { error } = await supabaseAdmin
+    .from("workflow_tasks")
+    .delete()
+    .eq("id", cleanTaskId)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  revalidatePath("/admin/workflow/tasks")
+  revalidatePath("/admin/workflow")
+}

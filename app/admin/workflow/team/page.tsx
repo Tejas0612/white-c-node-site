@@ -1,5 +1,6 @@
 import { requireAdminUser } from "@/lib/admin-auth"
 import { supabaseAdmin } from "@/lib/supabase-admin"
+import { isOwner } from "@/lib/admin-role-utils"
 import {
   AddTeamMemberButton,
   EditTeamMemberButton,
@@ -63,7 +64,8 @@ function getMemberRoles(member: any) {
 }
 
 export default async function WorkflowTeamPage() {
-  await requireAdminUser(["Admin"])
+  const user = await requireAdminUser(["Admin", "Owner"])
+  const canEditMatrix = isOwner(user)
 
   const { data: teamMembers, error: teamError } = await supabaseAdmin
     .from("workflow_team_members")
@@ -275,17 +277,23 @@ export default async function WorkflowTeamPage() {
                     ))}
 
                     <td className="p-4 text-right align-top">
-                      <EditRoleAccessButton
-                        row={{
-                          id: row.id,
-                          page_key: row.page_key,
-                          page_label: row.page_label,
-                          page_href: row.page_href,
-                          allowed_actions: row.allowed_actions,
-                          allowed_roles: allowedRoles,
-                          is_visible: Boolean(row.is_visible),
-                        }}
-                      />
+                      {canEditMatrix ? (
+                        <EditRoleAccessButton
+                          row={{
+                            id: row.id,
+                            page_key: row.page_key,
+                            page_label: row.page_label,
+                            page_href: row.page_href,
+                            allowed_actions: row.allowed_actions,
+                            allowed_roles: allowedRoles,
+                            is_visible: Boolean(row.is_visible),
+                          }}
+                        />
+                      ) : (
+                        <span className="text-xs font-medium text-muted-foreground">
+                          Owner only
+                        </span>
+                      )}
                     </td>
                   </tr>
                 )

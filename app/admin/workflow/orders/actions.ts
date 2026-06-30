@@ -195,3 +195,29 @@ export async function updateWorkflowOrderDetails(formData: FormData) {
   revalidatePath("/admin/workflow/orders")
   revalidatePath("/admin/workflow")
 }
+
+export async function deleteWorkflowOrder({
+  orderId,
+}: {
+  orderId: string
+}) {
+  await requireAdminUser(["Owner"])
+
+  const cleanOrderId = String(orderId || "").trim()
+
+  if (!cleanOrderId) {
+    throw new Error("Order ID is required.")
+  }
+
+  const { error } = await supabaseAdmin
+    .from("workflow_orders")
+    .delete()
+    .eq("id", cleanOrderId)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  revalidatePath("/admin/workflow/orders")
+  revalidatePath("/admin/workflow")
+}

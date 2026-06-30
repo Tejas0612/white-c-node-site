@@ -1,6 +1,6 @@
 import { requireAdminUser } from "@/lib/admin-auth"
 import { supabaseAdmin } from "@/lib/supabase-admin"
-import { isAdminOrOwner } from "@/lib/admin-role-utils"
+import { isAdminOrOwner, isOwner } from "@/lib/admin-role-utils"
 import { StatusFilterBar } from "@/components/admin/status-filter-bar"
 import { CreateOrderModal } from "./create-order-modal"
 import { OrderActions } from "./order-actions"
@@ -117,7 +117,7 @@ function MiniMetric({
 export default async function WorkflowOrdersPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ status?: string }>
+  searchParams?: Promise<{ status?: string; page?: string }>
 }) {
   const user = await requireAdminUser([
     "Admin",
@@ -128,9 +128,12 @@ export default async function WorkflowOrdersPage({
   ])
 
   const canEdit = isAdminOrOwner(user)
+  const canDelete = isOwner(user)
 
   const params = searchParams ? await searchParams : {}
   const statusFilter = params?.status || "All"
+  const currentPage = Math.max(Number(params?.page || "1"), 1)
+  const pageSize = 10
 
   const orderStatuses = [
     "All",
@@ -149,12 +152,20 @@ export default async function WorkflowOrdersPage({
 
   const allOrdersRaw = orders || []
 
-  const allOrders =
+  const filteredOrders =
     statusFilter === "All"
       ? allOrdersRaw
       : allOrdersRaw.filter(
           (order) => (order.status || "New") === statusFilter
         )
+
+  const totalFilteredOrders = filteredOrders.length
+  const totalPages = Math.max(Math.ceil(totalFilteredOrders / pageSize), 1)
+  const safeCurrentPage = Math.min(currentPage, totalPages)
+  const startIndex = (safeCurrentPage - 1) * pageSize
+  const endIndex = startIndex + pageSize
+
+  const allOrders = filteredOrders.slice(startIndex, endIndex)
 
   const totalOrders = allOrdersRaw.length
 
@@ -288,71 +299,6 @@ export default async function WorkflowOrdersPage({
         />
       </div>
 
-      <section className="mt-6 rounded-2xl border bg-background p-5">
-        <div className="flex flex-wrap items-start justify-between gap-5">
-          <div>
-            <h2 className="text-xl font-bold">Order Health</h2>
-
-            <p className="mt-1 text-sm text-muted-foreground">
-              Quick status split and operational attention points.
-            </p>
-          </div>
-
-          {highestValueOrder && (
-            <div className="rounded-2xl border bg-muted/30 px-5 py-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Highest Value Order
-              </p>
-
-              <p className="mt-1 font-bold">
-                {highestValueOrder.client_name}
-              </p>
-
-              <p className="text-sm text-muted-foreground">
-                {formatCurrency(highestValueOrder.order_value)}
-              </p>
-            </div>
-          )}
-        </div>
-
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
-          <MiniMetric
-            label="New"
-            value={getStatusCount(allOrdersRaw, "New")}
-          />
-
-          <MiniMetric
-            label="In Progress"
-            value={getStatusCount(allOrdersRaw, "In Progress")}
-          />
-
-          <MiniMetric
-            label="On Hold"
-            value={getStatusCount(allOrdersRaw, "On Hold")}
-          />
-
-          <MiniMetric
-            label="Dispatched"
-            value={getStatusCount(allOrdersRaw, "Dispatched")}
-          />
-
-          <MiniMetric
-            label="Delivered"
-            value={getStatusCount(allOrdersRaw, "Delivered")}
-          />
-
-          <MiniMetric
-            label="Cancelled"
-            value={getStatusCount(allOrdersRaw, "Cancelled")}
-          />
-
-          <MiniMetric
-            label="Need PO"
-            value={ordersWithoutPo.length}
-          />
-        </div>
-      </section>
-
       <StatusFilterBar
         basePath="/admin/workflow/orders"
         currentStatus={statusFilter}
@@ -360,11 +306,73 @@ export default async function WorkflowOrdersPage({
       />
             <section className="rounded-2xl border bg-background">
         <div className="border-b p-5">
-          <h2 className="text-xl font-bold">Order List</h2>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold">Order List</h2>
 
-          <p className="mt-1 text-sm text-muted-foreground">
-            Filtered by: {statusFilter}
-          </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Filtered by: {statusFilter}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="rounded-2xl border bg-muted/30 px-4 py-3 text-right">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Showing
+                </p>
+
+                <p className="mt-1 text-sm font-bold">
+                  {allOrders.length} of {totalFilteredOrders} orders
+                </p>
+              </div>
+
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2 rounded-2xl border bg-muted/30 px-3 py-3">
+                  <a
+                    href={
+                      safeCurrentPage <= 1
+                        ? "#"
+                        : statusFilter === "All"
+                          ? `/admin/workflow/orders?page=${safeCurrentPage - 1}`
+                          : `/admin/workflow/orders?status=${encodeURIComponent(
+                              statusFilter
+                            )}&page=${safeCurrentPage - 1}`
+                    }
+                    className={
+                      safeCurrentPage <= 1
+                        ? "pointer-events-none rounded-xl border px-3 py-2 text-xs font-semibold text-muted-foreground opacity-50"
+                        : "rounded-xl border px-3 py-2 text-xs font-semibold hover:bg-muted"
+                    }
+                  >
+                    Prev
+                  </a>
+
+                  <span className="px-2 text-sm font-bold">
+                    {safeCurrentPage} / {totalPages}
+                  </span>
+
+                  <a
+                    href={
+                      safeCurrentPage >= totalPages
+                        ? "#"
+                        : statusFilter === "All"
+                          ? `/admin/workflow/orders?page=${safeCurrentPage + 1}`
+                          : `/admin/workflow/orders?status=${encodeURIComponent(
+                              statusFilter
+                            )}&page=${safeCurrentPage + 1}`
+                    }
+                    className={
+                      safeCurrentPage >= totalPages
+                        ? "pointer-events-none rounded-xl border px-3 py-2 text-xs font-semibold text-muted-foreground opacity-50"
+                        : "rounded-xl border px-3 py-2 text-xs font-semibold hover:bg-muted"
+                    }
+                  >
+                    Next
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="divide-y">
@@ -455,6 +463,7 @@ export default async function WorkflowOrdersPage({
                       orderId={order.id}
                       orderCode={order.order_code}
                       currentStatus={order.status || "New"}
+                      canDelete={canDelete}
                     />
 
                     {canEdit && <EditOrderButton order={order} />}

@@ -20,10 +20,10 @@ export async function AdminShell({
     .order("display_order", { ascending: true })
 
   return (
-    <div className="flex min-h-screen overflow-x-hidden bg-muted/30">
+    <div className="flex h-screen overflow-hidden bg-muted/30">
       <WorkflowSidebar user={user} accessRows={accessRows || []} />
 
-      <main className="min-w-0 flex-1 overflow-hidden">
+      <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
         <header className="flex items-center justify-between border-b bg-background px-4 py-4 sm:px-6">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

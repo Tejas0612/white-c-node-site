@@ -26,3 +26,9 @@ export function isAdminOrOwner(user: AdminUserLike) {
 
   return roles.has("Admin") || roles.has("Owner")
 }
+
+export function isOwner(user: AdminUserLike) {
+  const roles = getAdminRoles(user)
+
+  return roles.has("Owner")
+}
