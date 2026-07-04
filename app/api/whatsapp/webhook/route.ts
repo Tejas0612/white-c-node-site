@@ -188,6 +188,13 @@ export async function POST(request: Request) {
   try {
     const body = await request.json()
 
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "whatsapp_webhook_post",
+        raw_payload: body,
+      })
+
     const entries = Array.isArray(body?.entry) ? body.entry : []
 
     for (const entry of entries) {
