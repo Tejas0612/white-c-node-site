@@ -48,6 +48,67 @@ function mapSendStatus(status: string) {
   return "Accepted"
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    value
+  )
+}
+
+async function findTaskByReference(taskReference: string) {
+  const cleanReference = cleanText(taskReference)
+  const upperReference = cleanReference.toUpperCase()
+
+  if (!cleanReference) {
+    return null
+  }
+
+  const { data: taskByCode, error: taskCodeError } = await supabaseAdmin
+    .from("workflow_tasks")
+    .select("id, task_code, title, status, assignee_id")
+    .ilike("task_code", upperReference)
+    .maybeSingle()
+
+  if (taskCodeError) {
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "task_lookup_by_code_error",
+        raw_payload: {
+          taskReference: cleanReference,
+          error: taskCodeError.message,
+        },
+      })
+  }
+
+  if (taskByCode) {
+    return taskByCode
+  }
+
+  if (!isUuid(cleanReference)) {
+    return null
+  }
+
+  const { data: taskById, error: taskIdError } = await supabaseAdmin
+    .from("workflow_tasks")
+    .select("id, task_code, title, status, assignee_id")
+    .eq("id", cleanReference)
+    .maybeSingle()
+
+  if (taskIdError) {
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "task_lookup_by_id_error",
+        raw_payload: {
+          taskReference: cleanReference,
+          error: taskIdError.message,
+        },
+      })
+  }
+
+  return taskById || null
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url)
 
@@ -123,26 +184,57 @@ async function handleTaskReply({
 }) {
   const cleanPhone = normalizePhone(fromPhone)
   const cleanMessage = cleanText(messageText)
-  const upperMessage = cleanMessage.toUpperCase()
 
   if (!cleanPhone || !cleanMessage) {
     return
   }
 
-  const { data: teamMember } = await supabaseAdmin
+  const upperMessage = cleanMessage.toUpperCase()
+
+  const { data: teamMembers } = await supabaseAdmin
     .from("workflow_team_members")
     .select("id, name, whatsapp")
-    .eq("whatsapp", cleanPhone)
-    .maybeSingle()
+    .eq("is_active", true)
+
+  const teamMember = (teamMembers || []).find((member) => {
+    return normalizePhone(member.whatsapp) === cleanPhone
+  })
 
   if (!teamMember) {
     return
   }
 
-  if (upperMessage.startsWith("DONE ")) {
-    const taskCode = cleanText(cleanMessage.slice(5))
+  if (upperMessage.startsWith("DONE")) {
+    const taskReference = cleanText(
+      cleanMessage
+        .replace(/^DONE/i, "")
+        .replace(/^TASKID/i, "")
+        .replace(/^TASK ID/i, "")
+        .replace(/^TASKCODE/i, "")
+        .replace(/^TASK CODE/i, "")
+        .trim()
+    )
 
-    if (!taskCode) {
+    if (!taskReference) {
+      return
+    }
+
+    const matchedTask = await findTaskByReference(taskReference)
+
+    if (!matchedTask) {
+      await supabaseAdmin
+        .from("whatsapp_webhook_events")
+        .insert({
+          event_type: "task_done_reply_no_match",
+          raw_payload: {
+            fromPhone: cleanPhone,
+            teamMemberId: teamMember.id,
+            teamMemberName: teamMember.name,
+            messageText: cleanMessage,
+            extractedReference: taskReference,
+          },
+        })
+
       return
     }
 
@@ -153,24 +245,56 @@ async function handleTaskReply({
         remark: `Marked done by WhatsApp reply from ${teamMember.name}`,
         updated_at: new Date().toISOString(),
       })
-      .eq("task_code", taskCode)
-      .eq("assignee_id", teamMember.id)
+      .eq("id", matchedTask.id)
+
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "task_marked_done_by_whatsapp",
+        raw_payload: {
+          fromPhone: cleanPhone,
+          teamMemberId: teamMember.id,
+          teamMemberName: teamMember.name,
+          taskId: matchedTask.id,
+          taskCode: matchedTask.task_code,
+          messageText: cleanMessage,
+        },
+      })
 
     return
   }
 
-  if (upperMessage.startsWith("REMARK ")) {
-    const withoutKeyword = cleanMessage.slice(7).trim()
+  if (upperMessage.startsWith("REMARK")) {
+    const withoutKeyword = cleanMessage.replace(/^REMARK/i, "").trim()
     const firstSpaceIndex = withoutKeyword.indexOf(" ")
 
     if (firstSpaceIndex <= 0) {
       return
     }
 
-    const taskCode = cleanText(withoutKeyword.slice(0, firstSpaceIndex))
+    const taskReference = cleanText(withoutKeyword.slice(0, firstSpaceIndex))
     const remark = cleanText(withoutKeyword.slice(firstSpaceIndex + 1))
 
-    if (!taskCode || !remark) {
+    if (!taskReference || !remark) {
+      return
+    }
+
+    const matchedTask = await findTaskByReference(taskReference)
+
+    if (!matchedTask) {
+      await supabaseAdmin
+        .from("whatsapp_webhook_events")
+        .insert({
+          event_type: "task_remark_reply_no_match",
+          raw_payload: {
+            fromPhone: cleanPhone,
+            teamMemberId: teamMember.id,
+            teamMemberName: teamMember.name,
+            messageText: cleanMessage,
+            extractedReference: taskReference,
+          },
+        })
+
       return
     }
 
@@ -180,10 +304,25 @@ async function handleTaskReply({
         remark,
         updated_at: new Date().toISOString(),
       })
-      .eq("task_code", taskCode)
-      .eq("assignee_id", teamMember.id)
+      .eq("id", matchedTask.id)
+
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "task_remark_added_by_whatsapp",
+        raw_payload: {
+          fromPhone: cleanPhone,
+          teamMemberId: teamMember.id,
+          teamMemberName: teamMember.name,
+          taskId: matchedTask.id,
+          taskCode: matchedTask.task_code,
+          messageText: cleanMessage,
+          remark,
+        },
+      })
   }
 }
+
 export async function POST(request: Request) {
   try {
     const body = await request.json()
@@ -191,14 +330,32 @@ export async function POST(request: Request) {
     await supabaseAdmin
       .from("whatsapp_webhook_events")
       .insert({
-        event_type: "whatsapp_webhook_post",
+        event_type: "whatsapp_webhook_post_v2_started",
         raw_payload: body,
       })
 
     const entries = Array.isArray(body?.entry) ? body.entry : []
 
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "whatsapp_webhook_entries_count",
+        raw_payload: {
+          entriesCount: entries.length,
+        },
+      })
+
     for (const entry of entries) {
       const changes = Array.isArray(entry?.changes) ? entry.changes : []
+
+      await supabaseAdmin
+        .from("whatsapp_webhook_events")
+        .insert({
+          event_type: "whatsapp_webhook_changes_count",
+          raw_payload: {
+            changesCount: changes.length,
+          },
+        })
 
       for (const change of changes) {
         const value = change?.value || {}
@@ -207,13 +364,23 @@ export async function POST(request: Request) {
           ? value.statuses
           : []
 
-        for (const statusItem of statuses) {
-          await updateOutboundMessageStatus(statusItem)
-        }
-
         const messages = Array.isArray(value?.messages)
           ? value.messages
           : []
+
+        await supabaseAdmin
+          .from("whatsapp_webhook_events")
+          .insert({
+            event_type: "whatsapp_webhook_value_detected",
+            raw_payload: {
+              statusesCount: statuses.length,
+              messagesCount: messages.length,
+            },
+          })
+
+        for (const statusItem of statuses) {
+          await updateOutboundMessageStatus(statusItem)
+        }
 
         for (const message of messages) {
           const fromPhone = normalizePhone(message?.from)
@@ -228,6 +395,17 @@ export async function POST(request: Request) {
               ""
           )
 
+          await supabaseAdmin
+            .from("whatsapp_webhook_events")
+            .insert({
+              event_type: "incoming_whatsapp_message",
+              raw_payload: {
+                fromPhone,
+                messageText,
+                message,
+              },
+            })
+
           await handleTaskReply({
             fromPhone,
             messageText,
@@ -236,10 +414,28 @@ export async function POST(request: Request) {
       }
     }
 
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "whatsapp_webhook_post_v2_completed",
+        raw_payload: {
+          success: true,
+        },
+      })
+
     return NextResponse.json({
       success: true,
     })
   } catch (error: any) {
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "whatsapp_webhook_error",
+        raw_payload: {
+          error: error?.message || "Webhook processing failed.",
+        },
+      })
+
     return NextResponse.json(
       {
         success: false,
