@@ -24,6 +24,7 @@
     "papaparse": "^5.5.3",
     "pdf-poppler": "^0.2.3",
     "pdfjs-dist": "^6.0.227",
+    "pptxgenjs": "^4.0.1",
     "react": "^19",
     "react-dom": "^19",
     "resend": "^6.12.4",
