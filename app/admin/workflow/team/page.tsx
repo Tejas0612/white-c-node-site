@@ -6,6 +6,7 @@ import {
   EditTeamMemberButton,
 } from "./team-member-actions"
 import { EditRoleAccessButton } from "./role-access-actions"
+import { DeleteTeamMemberButton } from "./delete-team-member-button"
 
 export const dynamic = "force-dynamic"
 
@@ -66,6 +67,7 @@ function getMemberRoles(member: any) {
 export default async function WorkflowTeamPage() {
   const user = await requireAdminUser(["Admin", "Owner"])
   const canEditMatrix = isOwner(user)
+  const canDeleteTeamMember = isOwner(user)
 
   const { data: teamMembers, error: teamError } = await supabaseAdmin
     .from("workflow_team_members")
@@ -179,6 +181,13 @@ export default async function WorkflowTeamPage() {
                   </div>
 
                   <EditTeamMemberButton member={member} />
+
+                  {canDeleteTeamMember && (
+                    <DeleteTeamMemberButton
+                      teamMemberId={member.id}
+                      teamMemberName={member.name}
+                    />
+                  )}
                 </div>
 
                 <div className="mt-5">

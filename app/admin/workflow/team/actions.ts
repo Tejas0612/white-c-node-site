@@ -138,3 +138,49 @@ export async function updateRoleAccessMatrix(formData: FormData) {
   revalidatePath("/admin/products")
   revalidatePath("/admin/brochure-import")
 }
+
+export async function deleteWorkflowTeamMember({
+  teamMemberId,
+}: {
+  teamMemberId: string
+}) {
+  await requireAdminUser(["Owner"])
+
+  const cleanTeamMemberId = String(teamMemberId || "").trim()
+
+  if (!cleanTeamMemberId) {
+    throw new Error("Team member ID is required.")
+  }
+
+  const { count: assignedTaskCount, error: assignedTaskError } =
+    await supabaseAdmin
+      .from("workflow_tasks")
+      .select("id", {
+        count: "exact",
+        head: true,
+      })
+      .eq("assignee_id", cleanTeamMemberId)
+
+  if (assignedTaskError) {
+    throw new Error(assignedTaskError.message)
+  }
+
+  if ((assignedTaskCount || 0) > 0) {
+    throw new Error(
+      "This team member has tasks assigned. Reassign or delete those tasks first."
+    )
+  }
+
+  const { error } = await supabaseAdmin
+    .from("workflow_team_members")
+    .delete()
+    .eq("id", cleanTeamMemberId)
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  revalidatePath("/admin/workflow/team")
+  revalidatePath("/admin/workflow/tasks")
+  revalidatePath("/admin/workflow")
+}

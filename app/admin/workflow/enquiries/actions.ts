@@ -4,9 +4,16 @@ import { revalidatePath } from "next/cache"
 import { requireAdminUser } from "@/lib/admin-auth"
 import { supabaseAdmin } from "@/lib/supabase-admin"
 
-function generateEnquiryCode() {
-  const randomPart = Math.random().toString(16).slice(2, 10).toUpperCase()
-  return `ENQ-${randomPart}`
+async function generateEnquiryCode() {
+  const { data, error } = await supabaseAdmin.rpc(
+    "generate_workflow_enquiry_code"
+  )
+
+  if (error || !data) {
+    throw new Error(error?.message || "Failed to generate enquiry code.")
+  }
+
+  return String(data)
 }
 
 function cleanText(value: FormDataEntryValue | string | null) {
@@ -178,7 +185,7 @@ export async function createWorkflowEnquiry(formData: FormData) {
   const { data: createdEnquiry, error } = await supabaseAdmin
     .from("workflow_enquiries")
     .insert({
-      enquiry_code: generateEnquiryCode(),
+      enquiry_code: await generateEnquiryCode(),
       client_name: clientName,
       product_names: productNames || null,
       tentative_quantity: tentativeQuantity || null,

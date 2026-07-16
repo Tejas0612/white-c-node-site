@@ -4,9 +4,16 @@ import { revalidatePath } from "next/cache"
 import { supabaseAdmin } from "@/lib/supabase-admin"
 import { requireAdminUser } from "@/lib/admin-auth"
 
-function generateTaskCode() {
-  const randomPart = Math.random().toString(16).slice(2, 10).toUpperCase()
-  return `T-${randomPart}`
+async function generateTaskCode() {
+  const { data, error } = await supabaseAdmin.rpc(
+    "generate_workflow_task_code"
+  )
+
+  if (error || !data) {
+    throw new Error(error?.message || "Failed to generate task code.")
+  }
+
+  return String(data)
 }
 
 export async function createWorkflowTask(formData: FormData) {
@@ -23,7 +30,7 @@ export async function createWorkflowTask(formData: FormData) {
   }
 
   const { error } = await supabaseAdmin.from("workflow_tasks").insert({
-    task_code: generateTaskCode(),
+    task_code: await generateTaskCode(),
     title,
     description: description || null,
     assignee_id: assigneeId || null,

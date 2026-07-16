@@ -54,63 +54,166 @@ function isUuid(value: string) {
   )
 }
 
-async function findTaskByReference(taskReference: string) {
+function normalizeTaskSearchText(value: string | null | undefined) {
+  return cleanText(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+}
+
+async function findTaskByReference(
+  taskReference: string,
+  assigneeId?: string
+) {
   const cleanReference = cleanText(taskReference)
-  const upperReference = cleanReference.toUpperCase()
 
   if (!cleanReference) {
     return null
   }
 
-  const { data: taskByCode, error: taskCodeError } = await supabaseAdmin
-    .from("workflow_tasks")
-    .select("id, task_code, title, status, assignee_id")
-    .ilike("task_code", upperReference)
-    .maybeSingle()
+  const normalizedReference = normalizeTaskSearchText(cleanReference)
 
-  if (taskCodeError) {
-    await supabaseAdmin
-      .from("whatsapp_webhook_events")
-      .insert({
-        event_type: "task_lookup_by_code_error",
-        raw_payload: {
-          taskReference: cleanReference,
-          error: taskCodeError.message,
-        },
-      })
-  }
+  const { data: taskByCode } = await supabaseAdmin
+    .from("workflow_tasks")
+    .select("id, task_code, title, description, status, assignee_id, created_at")
+    .ilike("task_code", cleanReference)
+    .maybeSingle()
 
   if (taskByCode) {
     return taskByCode
   }
 
-  if (!isUuid(cleanReference)) {
-    return null
+  if (isUuid(cleanReference)) {
+    const { data: taskById } = await supabaseAdmin
+      .from("workflow_tasks")
+      .select("id, task_code, title, description, status, assignee_id, created_at")
+      .eq("id", cleanReference)
+      .maybeSingle()
+
+    if (taskById) {
+      return taskById
+    }
   }
 
-  const { data: taskById, error: taskIdError } = await supabaseAdmin
+  const { data: recentTasks, error: recentTasksError } = await supabaseAdmin
     .from("workflow_tasks")
-    .select("id, task_code, title, status, assignee_id")
-    .eq("id", cleanReference)
-    .maybeSingle()
+    .select("id, task_code, title, description, status, assignee_id, created_at")
+    .order("created_at", { ascending: false })
+    .limit(100)
 
-  if (taskIdError) {
+  if (recentTasksError) {
     await supabaseAdmin
       .from("whatsapp_webhook_events")
       .insert({
-        event_type: "task_lookup_by_id_error",
+        event_type: "task_title_lookup_error",
         raw_payload: {
           taskReference: cleanReference,
-          error: taskIdError.message,
+          error: recentTasksError.message,
         },
       })
+
+    return null
   }
 
-  return taskById || null
+  const sortedTasks = [...(recentTasks || [])].sort((a, b) => {
+    if (!assigneeId) {
+      return 0
+    }
+
+    const aAssigned = a.assignee_id === assigneeId ? 1 : 0
+    const bAssigned = b.assignee_id === assigneeId ? 1 : 0
+
+    return bAssigned - aAssigned
+  })
+
+  const matchedTask = sortedTasks.find((task) => {
+    const normalizedTitle = normalizeTaskSearchText(task.title)
+    const normalizedDescription = normalizeTaskSearchText(task.description)
+    const normalizedCombined = normalizeTaskSearchText(
+      `${task.title || ""} ${task.description || ""}`
+    )
+
+    return (
+      normalizedTitle === normalizedReference ||
+      normalizedTitle.includes(normalizedReference) ||
+      normalizedReference.includes(normalizedTitle) ||
+      normalizedDescription.includes(normalizedReference) ||
+      normalizedCombined.includes(normalizedReference)
+    )
+  })
+
+  if (matchedTask) {
+    return matchedTask
+  }
+
+  await supabaseAdmin
+    .from("whatsapp_webhook_events")
+    .insert({
+      event_type: "task_reference_no_match_debug",
+      raw_payload: {
+        taskReference: cleanReference,
+        normalizedReference,
+        assigneeId,
+        checkedTasks: sortedTasks.slice(0, 20).map((task) => ({
+          task_code: task.task_code,
+          title: task.title,
+          description: task.description,
+          assignee_id: task.assignee_id,
+        })),
+      },
+    })
+
+  return null
 }
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
+
+  const isLocalTest = url.searchParams.get("local_test") === "1"
+
+  if (isLocalTest) {
+    if (process.env.NODE_ENV !== "development") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Local test is disabled outside development.",
+        },
+        {
+          status: 403,
+        }
+      )
+    }
+
+    const phone = normalizePhone(
+      url.searchParams.get("phone") || "919836232942"
+    )
+
+    const message = cleanText(
+      url.searchParams.get("message") || "done"
+    )
+
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "local_whatsapp_test_message",
+        raw_payload: {
+          phone,
+          message,
+        },
+      })
+
+    await handleTaskReply({
+      fromPhone: phone,
+      messageText: message,
+    })
+
+    return NextResponse.json({
+      success: true,
+      phone,
+      message,
+    })
+  }
 
   const mode = url.searchParams.get("hub.mode")
   const token = url.searchParams.get("hub.verify_token")
@@ -134,6 +237,7 @@ export async function GET(request: Request) {
     }
   )
 }
+
 async function updateOutboundMessageStatus(statusItem: any) {
   const whatsappMessageId = cleanText(statusItem?.id)
   const status = cleanText(statusItem?.status).toLowerCase()
@@ -175,6 +279,112 @@ async function updateOutboundMessageStatus(statusItem: any) {
     .eq("whatsapp_message_id", whatsappMessageId)
 }
 
+async function getRecentTaskFromLastMessage(toPhone: string) {
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+
+  const { data: recentMessages, error: recentMessageError } =
+    await supabaseAdmin
+      .from("whatsapp_outbound_messages")
+      .select("task_id, message_text, created_at, message_type, to_phone")
+      .eq("to_phone", toPhone)
+      .in("message_type", [
+        "task_reminder_template",
+        "task_reminder_text",
+      ])
+      .gte("created_at", fiveMinutesAgo)
+      .order("created_at", { ascending: false })
+      .limit(5)
+
+  if (recentMessageError) {
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "recent_task_lookup_error",
+        raw_payload: {
+          toPhone,
+          error: recentMessageError.message,
+        },
+      })
+
+    return null
+  }
+
+  const lastMessage = recentMessages?.[0]
+
+  if (!lastMessage) {
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "recent_task_not_found",
+        raw_payload: {
+          toPhone,
+          fiveMinutesAgo,
+        },
+      })
+
+    return null
+  }
+
+  if (lastMessage.task_id) {
+    const { data: taskById } = await supabaseAdmin
+      .from("workflow_tasks")
+      .select("id, task_code, title, description, status, assignee_id")
+      .eq("id", lastMessage.task_id)
+      .maybeSingle()
+
+    if (taskById) {
+      return taskById
+    }
+  }
+
+  const messageText = cleanText(lastMessage.message_text || "")
+  const codeMatch = messageText.match(/T-[A-Z0-9]+/i)
+
+  if (codeMatch?.[0]) {
+    const taskByCode = await findTaskByReference(codeMatch[0])
+
+    if (taskByCode) {
+      return taskByCode
+    }
+  }
+
+  await supabaseAdmin
+    .from("whatsapp_webhook_events")
+    .insert({
+      event_type: "recent_task_found_but_no_task_match",
+      raw_payload: {
+        toPhone,
+        lastMessage,
+      },
+    })
+
+  return null
+}
+
+function removeTaskWords(value: string) {
+  return cleanText(value)
+    .replace(/^task\s+id\s+/i, "")
+    .replace(/^task\s+code\s+/i, "")
+    .replace(/^taskid\s+/i, "")
+    .replace(/^taskcode\s+/i, "")
+    .replace(/^task\s+/i, "")
+    .trim()
+}
+
+function looksLikeTaskReference(value: string) {
+  const cleanValue = cleanText(value)
+
+  if (!cleanValue) {
+    return false
+  }
+
+  if (isUuid(cleanValue)) {
+    return true
+  }
+
+  return /^T-[A-Z0-9]+$/i.test(cleanValue)
+}
+
 async function handleTaskReply({
   fromPhone,
   messageText,
@@ -189,11 +399,9 @@ async function handleTaskReply({
     return
   }
 
-  const upperMessage = cleanMessage.toUpperCase()
-
   const { data: teamMembers } = await supabaseAdmin
     .from("workflow_team_members")
-    .select("id, name, whatsapp")
+    .select("id, name, whatsapp, role, roles, is_active")
     .eq("is_active", true)
 
   const teamMember = (teamMembers || []).find((member) => {
@@ -201,43 +409,99 @@ async function handleTaskReply({
   })
 
   if (!teamMember) {
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "task_reply_sender_not_found",
+        raw_payload: {
+          fromPhone: cleanPhone,
+          messageText: cleanMessage,
+        },
+      })
+
     return
   }
 
-  if (upperMessage.startsWith("DONE")) {
-    const taskReference = cleanText(
-      cleanMessage
-        .replace(/^DONE/i, "")
-        .replace(/^TASKID/i, "")
-        .replace(/^TASK ID/i, "")
-        .replace(/^TASKCODE/i, "")
-        .replace(/^TASK CODE/i, "")
-        .trim()
-    )
+  const lowerMessage = cleanMessage.toLowerCase()
 
-    if (!taskReference) {
-      return
+  const isDoneReply =
+    lowerMessage === "done" ||
+    lowerMessage.startsWith("done ")
+
+  const isRemarkReply =
+    lowerMessage === "remark" ||
+    lowerMessage.startsWith("remark ")
+
+  if (!isDoneReply && !isRemarkReply) {
+    return
+  }
+
+  const command = isDoneReply ? "DONE" : "REMARK"
+
+  let remainingText = cleanMessage
+    .replace(/^done/i, "")
+    .replace(/^remark/i, "")
+    .trim()
+
+  remainingText = removeTaskWords(remainingText)
+
+  let taskReference = ""
+  let remarkText = ""
+
+  if (remainingText) {
+    if (command === "DONE") {
+      taskReference = cleanText(remainingText)
     }
 
-    const matchedTask = await findTaskByReference(taskReference)
+    if (command === "REMARK") {
+      const colonIndex = remainingText.indexOf(":")
 
-    if (!matchedTask) {
-      await supabaseAdmin
-        .from("whatsapp_webhook_events")
-        .insert({
-          event_type: "task_done_reply_no_match",
-          raw_payload: {
-            fromPhone: cleanPhone,
-            teamMemberId: teamMember.id,
-            teamMemberName: teamMember.name,
-            messageText: cleanMessage,
-            extractedReference: taskReference,
-          },
-        })
+      if (colonIndex > 0) {
+        taskReference = cleanText(remainingText.slice(0, colonIndex))
+        remarkText = cleanText(remainingText.slice(colonIndex + 1))
+      } else {
+        const parts = remainingText.split(" ")
+        const possibleReference = cleanText(parts[0])
 
-      return
+        if (looksLikeTaskReference(possibleReference)) {
+          taskReference = possibleReference
+          remarkText = cleanText(parts.slice(1).join(" "))
+        } else {
+          remarkText = cleanText(remainingText)
+        }
+      }
     }
+  }
 
+  let matchedTask = null
+
+  if (taskReference) {
+    matchedTask = await findTaskByReference(taskReference, teamMember.id)
+  }
+
+  if (!matchedTask) {
+    matchedTask = await getRecentTaskFromLastMessage(cleanPhone)
+  }
+
+  if (!matchedTask) {
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "task_reply_no_recent_or_reference_match",
+        raw_payload: {
+          fromPhone: cleanPhone,
+          teamMemberId: teamMember.id,
+          teamMemberName: teamMember.name,
+          messageText: cleanMessage,
+          extractedReference: taskReference,
+          command,
+        },
+      })
+
+    return
+  }
+
+  if (command === "DONE") {
     await supabaseAdmin
       .from("workflow_tasks")
       .update({
@@ -258,69 +522,40 @@ async function handleTaskReply({
           taskId: matchedTask.id,
           taskCode: matchedTask.task_code,
           messageText: cleanMessage,
+          matchedUsing: taskReference ? "task_reference" : "recent_message",
         },
       })
 
     return
   }
 
-  if (upperMessage.startsWith("REMARK")) {
-    const withoutKeyword = cleanMessage.replace(/^REMARK/i, "").trim()
-    const firstSpaceIndex = withoutKeyword.indexOf(" ")
+  const finalRemark =
+    remarkText ||
+    `Remark received by WhatsApp reply from ${teamMember.name}`
 
-    if (firstSpaceIndex <= 0) {
-      return
-    }
+  await supabaseAdmin
+    .from("workflow_tasks")
+    .update({
+      remark: finalRemark,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", matchedTask.id)
 
-    const taskReference = cleanText(withoutKeyword.slice(0, firstSpaceIndex))
-    const remark = cleanText(withoutKeyword.slice(firstSpaceIndex + 1))
-
-    if (!taskReference || !remark) {
-      return
-    }
-
-    const matchedTask = await findTaskByReference(taskReference)
-
-    if (!matchedTask) {
-      await supabaseAdmin
-        .from("whatsapp_webhook_events")
-        .insert({
-          event_type: "task_remark_reply_no_match",
-          raw_payload: {
-            fromPhone: cleanPhone,
-            teamMemberId: teamMember.id,
-            teamMemberName: teamMember.name,
-            messageText: cleanMessage,
-            extractedReference: taskReference,
-          },
-        })
-
-      return
-    }
-
-    await supabaseAdmin
-      .from("workflow_tasks")
-      .update({
-        remark,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", matchedTask.id)
-
-    await supabaseAdmin
-      .from("whatsapp_webhook_events")
-      .insert({
-        event_type: "task_remark_added_by_whatsapp",
-        raw_payload: {
-          fromPhone: cleanPhone,
-          teamMemberId: teamMember.id,
-          teamMemberName: teamMember.name,
-          taskId: matchedTask.id,
-          taskCode: matchedTask.task_code,
-          messageText: cleanMessage,
-          remark,
-        },
-      })
-  }
+  await supabaseAdmin
+    .from("whatsapp_webhook_events")
+    .insert({
+      event_type: "task_remark_added_by_whatsapp",
+      raw_payload: {
+        fromPhone: cleanPhone,
+        teamMemberId: teamMember.id,
+        teamMemberName: teamMember.name,
+        taskId: matchedTask.id,
+        taskCode: matchedTask.task_code,
+        messageText: cleanMessage,
+        remark: finalRemark,
+        matchedUsing: taskReference ? "task_reference" : "recent_message",
+      },
+    })
 }
 
 export async function POST(request: Request) {

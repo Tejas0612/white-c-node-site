@@ -4,9 +4,16 @@ import { revalidatePath } from "next/cache"
 import { supabaseAdmin } from "@/lib/supabase-admin"
 import { requireAdminUser } from "@/lib/admin-auth"
 
-function generateOrderCode() {
-  const randomPart = Math.random().toString(16).slice(2, 10).toUpperCase()
-  return `ORD-${randomPart}`
+async function generateOrderCode() {
+  const { data, error } = await supabaseAdmin.rpc(
+    "generate_workflow_order_code"
+  )
+
+  if (error || !data) {
+    throw new Error(error?.message || "Failed to generate order code.")
+  }
+
+  return String(data)
 }
 
 export async function createWorkflowOrder(formData: FormData) {
@@ -39,7 +46,7 @@ export async function createWorkflowOrder(formData: FormData) {
       : Number((cleanQuantity * cleanSalePrice).toFixed(2))
 
   const { error } = await supabaseAdmin.from("workflow_orders").insert({
-    order_code: generateOrderCode(),
+    order_code: await generateOrderCode(),
     client_name: clientName,
     product_name: productName,
     quantity: cleanQuantity,
