@@ -24,9 +24,15 @@ export async function createWorkflowTask(formData: FormData) {
   const assigneeId = String(formData.get("assignee_id") || "").trim()
   const dueDate = String(formData.get("due_date") || "").trim()
   const status = String(formData.get("status") || "Pending").trim()
+  const orderId = String(formData.get("order_id") || "").trim()
+  const enquiryId = String(formData.get("enquiry_id") || "").trim()
 
   if (!title) {
     throw new Error("Task title is required.")
+  }
+
+  if (orderId && enquiryId) {
+    throw new Error("A task can be linked to either an order or an enquiry, not both.")
   }
 
   const { error } = await supabaseAdmin.from("workflow_tasks").insert({
@@ -36,6 +42,8 @@ export async function createWorkflowTask(formData: FormData) {
     assignee_id: assigneeId || null,
     due_date: dueDate || null,
     status: status || "Pending",
+    order_id: orderId || null,
+    enquiry_id: enquiryId || null,
   })
 
   if (error) {
@@ -43,6 +51,8 @@ export async function createWorkflowTask(formData: FormData) {
   }
 
   revalidatePath("/admin/workflow/tasks")
+  revalidatePath("/admin/workflow/orders")
+  revalidatePath("/admin/workflow/enquiries")
   revalidatePath("/admin/workflow")
 }
 
@@ -118,6 +128,8 @@ export async function updateWorkflowTaskDetails(formData: FormData) {
   const dueDate = String(formData.get("due_date") || "").trim()
   const status = String(formData.get("status") || "").trim()
   const remark = String(formData.get("remark") || "").trim()
+  const orderId = String(formData.get("order_id") || "").trim()
+  const enquiryId = String(formData.get("enquiry_id") || "").trim()
 
   if (!taskId) {
     throw new Error("Task ID is required.")
@@ -125,6 +137,10 @@ export async function updateWorkflowTaskDetails(formData: FormData) {
 
   if (!title) {
     throw new Error("Task title is required.")
+  }
+
+  if (orderId && enquiryId) {
+    throw new Error("A task can be linked to either an order or an enquiry, not both.")
   }
 
   const { error } = await supabaseAdmin
@@ -136,6 +152,8 @@ export async function updateWorkflowTaskDetails(formData: FormData) {
       due_date: dueDate || null,
       status: status || "Open",
       remark: remark || null,
+      order_id: orderId || null,
+      enquiry_id: enquiryId || null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", taskId)
@@ -145,6 +163,8 @@ export async function updateWorkflowTaskDetails(formData: FormData) {
   }
 
   revalidatePath("/admin/workflow/tasks")
+  revalidatePath("/admin/workflow/orders")
+  revalidatePath("/admin/workflow/enquiries")
   revalidatePath("/admin/workflow")
 }
 

@@ -2,11 +2,7 @@
 
 import { useState, useTransition } from "react"
 import { updateWorkflowTaskDetails } from "./actions"
-
-type TeamMember = {
-  id: string
-  name: string
-}
+import type { EnquiryOption, OrderOption, TeamMemberOption } from "./assign-task-modal"
 
 type Task = {
   id: string
@@ -16,18 +12,47 @@ type Task = {
   due_date: string | null
   status: string | null
   remark: string | null
+  order_id: string | null
+  enquiry_id: string | null
+}
+
+type RelationType = "general" | "order" | "enquiry"
+
+function getInitialRelationType(task: Task): RelationType {
+  if (task.order_id) {
+    return "order"
+  }
+
+  if (task.enquiry_id) {
+    return "enquiry"
+  }
+
+  return "general"
 }
 
 export function EditTaskButton({
   task,
   teamMembers,
+  orders,
+  enquiries,
 }: {
   task: Task
-  teamMembers: TeamMember[]
+  teamMembers: TeamMemberOption[]
+  orders: OrderOption[]
+  enquiries: EnquiryOption[]
 }) {
   const [isOpen, setIsOpen] = useState(false)
+  const [relationType, setRelationType] = useState<RelationType>(
+    getInitialRelationType(task)
+  )
   const [error, setError] = useState("")
   const [isPending, startTransition] = useTransition()
+
+  function openModal() {
+    setRelationType(getInitialRelationType(task))
+    setError("")
+    setIsOpen(true)
+  }
 
   function handleSubmit(formData: FormData) {
     setError("")
@@ -46,7 +71,7 @@ export function EditTaskButton({
     <>
       <button
         type="button"
-        onClick={() => setIsOpen(true)}
+        onClick={openModal}
         className="self-end rounded-full border border-muted-foreground/20 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
       >
         Edit
@@ -74,6 +99,67 @@ export function EditTaskButton({
 
             <form action={handleSubmit} className="grid gap-5 p-6">
               <input type="hidden" name="task_id" value={task.id} />
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="text-sm font-semibold">Related To</label>
+                  <select
+                    value={relationType}
+                    onChange={(event) =>
+                      setRelationType(event.target.value as RelationType)
+                    }
+                    className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
+                  >
+                    <option value="general">General Task</option>
+                    <option value="order">Order</option>
+                    <option value="enquiry">Enquiry</option>
+                  </select>
+                </div>
+
+                {relationType === "order" && (
+                  <div>
+                    <label className="text-sm font-semibold">Related Order</label>
+                    <select
+                      name="order_id"
+                      required
+                      defaultValue={task.order_id || ""}
+                      className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
+                    >
+                      <option value="" disabled>
+                        Select an order
+                      </option>
+                      {orders.map((order) => (
+                        <option key={order.id} value={order.id}>
+                          {order.order_code} — {order.client_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {relationType === "enquiry" && (
+                  <div>
+                    <label className="text-sm font-semibold">
+                      Related Enquiry
+                    </label>
+                    <select
+                      name="enquiry_id"
+                      required
+                      defaultValue={task.enquiry_id || ""}
+                      className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
+                    >
+                      <option value="" disabled>
+                        Select an enquiry
+                      </option>
+                      {enquiries.map((enquiry) => (
+                        <option key={enquiry.id} value={enquiry.id}>
+                          {enquiry.enquiry_code} — {enquiry.client_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
 
               <div>
                 <label className="text-sm font-semibold">Title</label>

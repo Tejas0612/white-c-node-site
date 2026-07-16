@@ -45,6 +45,34 @@ function getAssigneeId(task: any) {
   return assignee?.id || task.assignee_id || "unassigned"
 }
 
+function getRelatedRecord(task: any) {
+  const order = Array.isArray(task.workflow_orders)
+    ? task.workflow_orders[0]
+    : task.workflow_orders
+
+  if (order) {
+    return {
+      type: "Order",
+      code: order.order_code,
+      clientName: order.client_name,
+    }
+  }
+
+  const enquiry = Array.isArray(task.workflow_enquiries)
+    ? task.workflow_enquiries[0]
+    : task.workflow_enquiries
+
+  if (enquiry) {
+    return {
+      type: "Enquiry",
+      code: enquiry.enquiry_code,
+      clientName: enquiry.client_name,
+    }
+  }
+
+  return null
+}
+
 function InsightCard({
   label,
   value,
@@ -247,6 +275,16 @@ export default async function WorkflowTasksPage({
         role,
         whatsapp,
         is_active
+      ),
+      workflow_orders!workflow_tasks_order_id_fkey (
+        id,
+        order_code,
+        client_name
+      ),
+      workflow_enquiries!workflow_tasks_enquiry_id_fkey (
+        id,
+        enquiry_code,
+        client_name
       )
     `
     )
@@ -258,8 +296,20 @@ export default async function WorkflowTasksPage({
     .eq("is_active", true)
     .order("name", { ascending: true })
 
+  const { data: orderOptions } = await supabaseAdmin
+    .from("workflow_orders")
+    .select("id, order_code, client_name")
+    .order("created_at", { ascending: false })
+
+  const { data: enquiryOptions } = await supabaseAdmin
+    .from("workflow_enquiries")
+    .select("id, enquiry_code, client_name")
+    .order("created_at", { ascending: false })
+
   const allTasksRaw = tasks || []
   const activeTeamMembers = teamMembers || []
+  const allOrderOptions = orderOptions || []
+  const allEnquiryOptions = enquiryOptions || []
 
   const filteredTasks =
     statusFilter === "All"
@@ -347,7 +397,11 @@ export default async function WorkflowTasksPage({
           </p>
         </div>
 
-        <AssignTaskModal teamMembers={activeTeamMembers} />
+        <AssignTaskModal
+          teamMembers={activeTeamMembers}
+          orders={allOrderOptions}
+          enquiries={allEnquiryOptions}
+        />
       </div>
 
       {error && (
@@ -483,6 +537,7 @@ export default async function WorkflowTasksPage({
             const assignee = Array.isArray(task.workflow_team_members)
               ? task.workflow_team_members[0]
               : task.workflow_team_members
+            const relatedRecord = getRelatedRecord(task)
 
             return (
               <div key={task.id} className="p-5">
@@ -513,6 +568,22 @@ export default async function WorkflowTasksPage({
                     <p className="mt-1 text-sm text-muted-foreground">
                       {task.description || "—"}
                     </p>
+
+                    <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Related To
+                    </p>
+
+                    <p className="mt-1 text-sm font-semibold">
+                      {relatedRecord
+                        ? `${relatedRecord.type}: ${relatedRecord.code}`
+                        : "General Task"}
+                    </p>
+
+                    {relatedRecord && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {relatedRecord.clientName}
+                      </p>
+                    )}
                   </div>
 
                   <div>
@@ -567,6 +638,8 @@ export default async function WorkflowTasksPage({
                         <EditTaskButton
                           task={task}
                           teamMembers={activeTeamMembers}
+                          orders={allOrderOptions}
+                          enquiries={allEnquiryOptions}
                         />
                       )}
                     </div>

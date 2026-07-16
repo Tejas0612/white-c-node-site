@@ -140,6 +140,7 @@ export default async function WorkflowOrdersPage({
     "New",
     "In Progress",
     "On Hold",
+    "Partially Dispatched",
     "Dispatched",
     "Delivered",
     "Cancelled",
@@ -150,7 +151,14 @@ export default async function WorkflowOrdersPage({
     .select("*")
     .order("created_at", { ascending: false })
 
+  const { data: teamMembers } = await supabaseAdmin
+    .from("workflow_team_members")
+    .select("id, name, role, whatsapp, is_active")
+    .eq("is_active", true)
+    .order("name", { ascending: true })
+
   const allOrdersRaw = orders || []
+  const activeTeamMembers = teamMembers || []
 
   const filteredOrders =
     statusFilter === "All"
@@ -182,7 +190,9 @@ export default async function WorkflowOrdersPage({
   )
 
   const pendingDispatchOrders = allOrdersRaw.filter((order) =>
-    ["New", "In Progress", "On Hold"].includes(order.status || "New")
+    ["New", "In Progress", "On Hold", "Partially Dispatched"].includes(
+      order.status || "New"
+    )
   )
 
   const ordersWithoutPo = allOrdersRaw.filter((order) => !order.po_url)
@@ -462,7 +472,9 @@ export default async function WorkflowOrdersPage({
                     <OrderActions
                       orderId={order.id}
                       orderCode={order.order_code}
+                      clientName={order.client_name}
                       currentStatus={order.status || "New"}
+                      teamMembers={activeTeamMembers}
                       canDelete={canDelete}
                     />
 

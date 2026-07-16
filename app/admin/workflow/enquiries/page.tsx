@@ -387,6 +387,7 @@ export default async function WorkflowEnquiriesPage({
                     <EnquiryActions
                       enquiryId={enquiry.id}
                       enquiryCode={enquiry.enquiry_code}
+                      clientName={enquiry.client_name}
                       currentStatus={enquiry.status || "New"}
                       currentRemark={enquiry.remarks || ""}
                       successProbability={enquiry.success_probability || 10}
@@ -398,6 +399,7 @@ export default async function WorkflowEnquiriesPage({
                       }
                       poStatus={enquiry.po_status || "Not Received"}
                       hasPhone={Boolean(enquiry.client_phone)}
+                      teamMembers={allTeamMembers}
                     />
 
                     <ProposalButtons

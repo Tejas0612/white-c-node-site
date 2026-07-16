@@ -6,22 +6,40 @@ import {
   updateWorkflowOrderRemark,
   updateWorkflowOrderStatus,
 } from "./actions"
+import { AssignTaskModal } from "../tasks/assign-task-modal"
+import type { TeamMemberOption } from "../tasks/assign-task-modal"
 
 type OrderActionsProps = {
   orderId: string
   orderCode: string
+  clientName: string
   currentStatus: string
+  teamMembers: TeamMemberOption[]
   canDelete?: boolean
 }
 
 export function OrderActions({
   orderId,
   orderCode,
+  clientName,
   currentStatus,
+  teamMembers,
   canDelete = false,
 }: OrderActionsProps) {
   return (
     <div className="w-full space-y-2">
+      <AssignTaskModal
+        teamMembers={teamMembers}
+        initialRelation={{
+          type: "order",
+          id: orderId,
+          code: orderCode,
+          clientName,
+        }}
+        buttonLabel="Assign Task"
+        buttonClassName="h-10 w-full rounded-xl border px-4 py-2 text-sm font-semibold hover:bg-muted"
+      />
+
       <UpdateOrderStatusButton
         orderId={orderId}
         orderCode={orderCode}
@@ -121,6 +139,9 @@ function UpdateOrderStatusButton({
                     <option value="New">New</option>
                     <option value="In Progress">In Progress</option>
                     <option value="On Hold">On Hold</option>
+                    <option value="Partially Dispatched">
+                      Partially Dispatched
+                    </option>
                     <option value="Dispatched">Dispatched</option>
                     <option value="Delivered">Delivered</option>
                     <option value="Cancelled">Cancelled</option>

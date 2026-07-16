@@ -5,10 +5,13 @@ import {
   updateWorkflowEnquiryRemark,
   updateWorkflowEnquiryTracking,
 } from "./actions"
+import { AssignTaskModal } from "../tasks/assign-task-modal"
+import type { TeamMemberOption } from "../tasks/assign-task-modal"
 
 type EnquiryActionsProps = {
   enquiryId: string
   enquiryCode: string
+  clientName: string
   currentStatus: string
   currentRemark: string
   successProbability: number
@@ -16,20 +19,35 @@ type EnquiryActionsProps = {
   clientResponseStatus: string
   poStatus: string
   hasPhone: boolean
+  teamMembers: TeamMemberOption[]
 }
 
 export function EnquiryActions({
   enquiryId,
   enquiryCode,
+  clientName,
   currentStatus,
   currentRemark,
   successProbability,
   proposalStatus,
   clientResponseStatus,
   poStatus,
+  teamMembers,
 }: EnquiryActionsProps) {
   return (
     <div className="w-full space-y-2">
+      <AssignTaskModal
+        teamMembers={teamMembers}
+        initialRelation={{
+          type: "enquiry",
+          id: enquiryId,
+          code: enquiryCode,
+          clientName,
+        }}
+        buttonLabel="Assign Task"
+        buttonClassName="h-10 w-full rounded-xl border px-4 py-2 text-sm font-semibold hover:bg-muted"
+      />
+
       <UpdateEnquiryTrackingButton
         enquiryId={enquiryId}
         enquiryCode={enquiryCode}
