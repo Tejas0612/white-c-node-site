@@ -241,12 +241,12 @@ export function AssignTaskModal({
                   <label className="text-sm font-semibold">Status</label>
                   <select
                     name="status"
-                    defaultValue="Pending"
+                    defaultValue="Open"
                     className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
                   >
-                    <option value="Pending">Pending</option>
+                    <option value="Open">Open</option>
+                    <option value="In Progress">In Progress</option>
                     <option value="Done">Done</option>
-                    <option value="Remarked">Remarked</option>
                   </select>
                 </div>
               </div>

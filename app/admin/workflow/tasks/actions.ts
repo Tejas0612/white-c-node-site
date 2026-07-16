@@ -17,13 +17,13 @@ async function generateTaskCode() {
 }
 
 export async function createWorkflowTask(formData: FormData) {
-  await requireAdminUser(["Operations", "Sales", "Accounts"])
+  await requireAdminUser(["Admin", "Owner", "Operations", "Sales", "Accounts"])
 
   const title = String(formData.get("title") || "").trim()
   const description = String(formData.get("description") || "").trim()
   const assigneeId = String(formData.get("assignee_id") || "").trim()
   const dueDate = String(formData.get("due_date") || "").trim()
-  const status = String(formData.get("status") || "Pending").trim()
+  const status = String(formData.get("status") || "Open").trim()
   const orderId = String(formData.get("order_id") || "").trim()
   const enquiryId = String(formData.get("enquiry_id") || "").trim()
 
@@ -41,7 +41,7 @@ export async function createWorkflowTask(formData: FormData) {
     description: description || null,
     assignee_id: assigneeId || null,
     due_date: dueDate || null,
-    status: status || "Pending",
+    status: status || "Open",
     order_id: orderId || null,
     enquiry_id: enquiryId || null,
   })
@@ -57,7 +57,7 @@ export async function createWorkflowTask(formData: FormData) {
 }
 
 export async function markWorkflowTaskDone(taskId: string) {
-  await requireAdminUser(["Operations", "Sales", "Accounts"])
+  await requireAdminUser(["Admin", "Owner", "Operations", "Sales", "Accounts"])
 
   if (!taskId) {
     throw new Error("Task ID is required.")
@@ -88,10 +88,10 @@ export async function updateWorkflowTaskRemark({
   remark: string
   status: string
 }) {
-  await requireAdminUser(["Operations", "Sales", "Accounts"])
+  await requireAdminUser(["Admin", "Owner", "Operations", "Sales", "Accounts"])
 
   const cleanRemark = String(remark || "").trim()
-  const cleanStatus = String(status || "Remarked").trim()
+  const cleanStatus = String(status || "Open").trim()
 
   if (!taskId) {
     throw new Error("Task ID is required.")

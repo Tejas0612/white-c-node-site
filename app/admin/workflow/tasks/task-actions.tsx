@@ -23,7 +23,11 @@ export function TaskActions({
   const [isRemarkOpen, setIsRemarkOpen] = useState(false)
   const [remark, setRemark] = useState("")
   const [status, setStatus] = useState(
-    currentStatus === "Done" ? "Done" : "Remarked"
+    currentStatus === "Done"
+      ? "Done"
+      : currentStatus === "In Progress"
+        ? "In Progress"
+        : "Open"
   )
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
@@ -180,8 +184,8 @@ export function TaskActions({
                   onChange={(event) => setStatus(event.target.value)}
                   className="mt-2 h-11 w-full rounded-xl border bg-background px-4 text-sm outline-none focus:ring-2 focus:ring-foreground/20"
                 >
-                  <option value="Remarked">Remarked</option>
-                  <option value="Pending">Pending</option>
+                  <option value="Open">Open</option>
+                  <option value="In Progress">In Progress</option>
                   <option value="Done">Done</option>
                 </select>
               </div>

@@ -8,110 +8,149 @@ import { EditOrderButton } from "./edit-order-button"
 
 export const dynamic = "force-dynamic"
 
+function statusClasses(label: string) {
+  if (["Delivered", "Done", "Won"].includes(label)) {
+    return "border-green-200 bg-green-50 text-green-700"
+  }
+
+  if (["Cancelled", "Lost", "Overdue"].includes(label)) {
+    return "border-red-200 bg-red-50 text-red-700"
+  }
+
+  if (
+    [
+      "New",
+      "Open",
+      "In Progress",
+      "Partially Dispatched",
+      "Dispatched",
+      "On Hold",
+    ].includes(label)
+  ) {
+    return "border-amber-200 bg-amber-50 text-amber-700"
+  }
+
+  return "border-slate-200 bg-slate-50 text-slate-600"
+}
+
 function StatusPill({ label }: { label: string }) {
   return (
-    <span className="inline-flex rounded-full bg-muted px-3 py-1 text-xs font-semibold">
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${statusClasses(label)}`}
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-current" />
       {label}
     </span>
+  )
+}
+
+function SignalCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: number
+  tone: "amber" | "green" | "red"
+}) {
+  const classes =
+    tone === "green"
+      ? "border-green-200 bg-green-50/60 text-green-700"
+      : tone === "red"
+        ? "border-red-200 bg-red-50/60 text-red-700"
+        : "border-amber-200 bg-amber-50/60 text-amber-700"
+
+  return (
+    <div className={`rounded-2xl border p-5 ${classes}`}>
+      <div className="flex items-center gap-2">
+        <span className="h-2.5 w-2.5 rounded-full bg-current" />
+        <p className="text-xs font-bold uppercase tracking-wide">{label}</p>
+      </div>
+      <p className="mt-3 text-3xl font-bold">{value}</p>
+    </div>
   )
 }
 
 function formatCurrency(value: number | string | null | undefined) {
   const numberValue = Number(value || 0)
 
-  if (!numberValue) {
-    return "₹0"
-  }
-
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(numberValue)
-}
-
-function formatRateCurrency(value: number | string | null | undefined) {
-  const numberValue = Number(value || 0)
-
-  if (!numberValue) {
-    return "₹0.00"
-  }
-
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(numberValue)
 }
 
-function getOrderValue(order: any) {
-  return Number(order.order_value || 0)
+function normalizeTaskStatus(status: string | null | undefined) {
+  if (status === "Done") return "Done"
+  if (status === "In Progress") return "In Progress"
+  return "Open"
 }
 
-function getStatusCount(orders: any[], status: string) {
-  return orders.filter((order) => (order.status || "New") === status).length
+function getAssigneeName(task: any) {
+  const assignee = Array.isArray(task.workflow_team_members)
+    ? task.workflow_team_members[0]
+    : task.workflow_team_members
+
+  return assignee?.name || "Unassigned"
 }
 
-function InsightCard({
-  label,
-  value,
-  helper,
-  tone,
-}: {
-  label: string
-  value: string | number
-  helper?: string
-  tone?: "default" | "orange" | "green" | "blue" | "red"
-}) {
-  const toneClass =
-    tone === "orange"
-      ? "text-orange-600"
-      : tone === "green"
-        ? "text-green-600"
-        : tone === "blue"
-          ? "text-blue-600"
-          : tone === "red"
-            ? "text-red-600"
-            : "text-foreground"
+function RelatedTasks({ tasks }: { tasks: any[] }) {
+  const today = new Date().toISOString().slice(0, 10)
 
   return (
-    <div className="rounded-2xl border bg-background p-6">
-      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
-      </p>
+    <details className="mt-5 rounded-2xl border bg-muted/20">
+      <summary className="cursor-pointer list-none px-4 py-3 text-sm font-bold">
+        Tasks attached · {tasks.length}
+      </summary>
 
-      <h2 className={`mt-4 text-3xl font-bold ${toneClass}`}>
-        {value}
-      </h2>
+      <div className="border-t px-4 py-3">
+        {tasks.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No tasks attached yet.</p>
+        ) : (
+          <div className="grid gap-2">
+            {tasks.map((task) => {
+              const status = normalizeTaskStatus(task.status)
+              const isOverdue =
+                Boolean(task.due_date) &&
+                task.due_date < today &&
+                status !== "Done"
 
-      {helper && (
-        <p className="mt-2 text-xs font-medium text-muted-foreground">
-          {helper}
-        </p>
-      )}
-    </div>
+              return (
+                <div
+                  key={task.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-background px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold">{task.title}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {getAssigneeName(task)} · Due {task.due_date || "—"}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <StatusPill label={status} />
+                    {isOverdue && <StatusPill label="Overdue" />}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </details>
   )
 }
 
-function MiniMetric({
-  label,
-  value,
+function buildPageHref({
+  statusFilter,
+  page,
 }: {
-  label: string
-  value: string | number
+  statusFilter: string
+  page: number
 }) {
-  return (
-    <div className="rounded-2xl border bg-muted/30 px-4 py-3">
-      <p className="text-xs font-semibold text-muted-foreground">
-        {label}
-      </p>
-
-      <p className="mt-1 text-lg font-bold">
-        {value}
-      </p>
-    </div>
-  )
+  return statusFilter === "All"
+    ? `/admin/workflow/orders?page=${page}`
+    : `/admin/workflow/orders?status=${encodeURIComponent(statusFilter)}&page=${page}`
 }
 
 export default async function WorkflowOrdersPage({
@@ -129,12 +168,10 @@ export default async function WorkflowOrdersPage({
 
   const canEdit = isAdminOrOwner(user)
   const canDelete = isOwner(user)
-
   const params = searchParams ? await searchParams : {}
   const statusFilter = params?.status || "All"
   const currentPage = Math.max(Number(params?.page || "1"), 1)
   const pageSize = 10
-
   const orderStatuses = [
     "All",
     "New",
@@ -146,19 +183,46 @@ export default async function WorkflowOrdersPage({
     "Cancelled",
   ]
 
-  const { data: orders, error } = await supabaseAdmin
-    .from("workflow_orders")
-    .select("*")
-    .order("created_at", { ascending: false })
-
-  const { data: teamMembers } = await supabaseAdmin
-    .from("workflow_team_members")
-    .select("id, name, role, whatsapp, is_active")
-    .eq("is_active", true)
-    .order("name", { ascending: true })
+  const [{ data: orders, error }, { data: teamMembers }, { data: tasks, error: taskError }] =
+    await Promise.all([
+      supabaseAdmin
+        .from("workflow_orders")
+        .select("*")
+        .order("created_at", { ascending: false }),
+      supabaseAdmin
+        .from("workflow_team_members")
+        .select("id, name, role, whatsapp, is_active")
+        .eq("is_active", true)
+        .order("name", { ascending: true }),
+      supabaseAdmin
+        .from("workflow_tasks")
+        .select(
+          `
+          id,
+          title,
+          status,
+          due_date,
+          order_id,
+          workflow_team_members (
+            id,
+            name
+          )
+        `
+        )
+        .not("order_id", "is", null)
+        .order("created_at", { ascending: false }),
+    ])
 
   const allOrdersRaw = orders || []
   const activeTeamMembers = teamMembers || []
+  const tasksByOrder = new Map<string, any[]>()
+
+  for (const task of tasks || []) {
+    if (!task.order_id) continue
+    const current = tasksByOrder.get(task.order_id) || []
+    current.push(task)
+    tasksByOrder.set(task.order_id, current)
+  }
 
   const filteredOrders =
     statusFilter === "All"
@@ -171,142 +235,37 @@ export default async function WorkflowOrdersPage({
   const totalPages = Math.max(Math.ceil(totalFilteredOrders / pageSize), 1)
   const safeCurrentPage = Math.min(currentPage, totalPages)
   const startIndex = (safeCurrentPage - 1) * pageSize
-  const endIndex = startIndex + pageSize
+  const allOrders = filteredOrders.slice(startIndex, startIndex + pageSize)
 
-  const allOrders = filteredOrders.slice(startIndex, endIndex)
-
-  const totalOrders = allOrdersRaw.length
-
-  const activeOrders = allOrdersRaw.filter(
+  const openCount = allOrdersRaw.filter(
     (order) => !["Delivered", "Cancelled"].includes(order.status || "New")
-  )
-
-  const deliveredOrders = allOrdersRaw.filter(
-    (order) => order.status === "Delivered"
-  )
-
-  const cancelledOrders = allOrdersRaw.filter(
-    (order) => order.status === "Cancelled"
-  )
-
-  const pendingDispatchOrders = allOrdersRaw.filter((order) =>
-    ["New", "In Progress", "On Hold", "Partially Dispatched"].includes(
-      order.status || "New"
-    )
-  )
-
-  const ordersWithoutPo = allOrdersRaw.filter((order) => !order.po_url)
-
-  const totalValue = allOrdersRaw.reduce(
-    (sum, order) => sum + getOrderValue(order),
-    0
-  )
-
-  const activeValue = activeOrders.reduce(
-    (sum, order) => sum + getOrderValue(order),
-    0
-  )
-
-  const deliveredValue = deliveredOrders.reduce(
-    (sum, order) => sum + getOrderValue(order),
-    0
-  )
-
-  const cancelledValue = cancelledOrders.reduce(
-    (sum, order) => sum + getOrderValue(order),
-    0
-  )
-
-  const averageOrderValue =
-    totalOrders > 0 ? Math.round(totalValue / totalOrders) : 0
-
-  const highestValueOrder = [...allOrdersRaw].sort(
-    (a, b) => getOrderValue(b) - getOrderValue(a)
-  )[0]
+  ).length
+  const deliveredCount = allOrdersRaw.filter((order) => order.status === "Delivered").length
+  const cancelledCount = allOrdersRaw.filter((order) => order.status === "Cancelled").length
 
   return (
     <div className="max-w-full overflow-hidden">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Workflow
-          </p>
-
-          <h1 className="mt-2 text-4xl font-bold tracking-tight">
-            Orders
-          </h1>
-
+          <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Workflow</p>
+          <h1 className="mt-2 text-4xl font-bold tracking-tight">Orders</h1>
           <p className="mt-2 text-muted-foreground">
-            Track order value, dispatch progress, PO status, remarks, and
-            operational follow-ups.
+            Track fulfilment, dispatch status, and linked operational tasks.
           </p>
         </div>
-
         <CreateOrderModal />
       </div>
 
-      {error && (
+      {(error || taskError) && (
         <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-5 text-red-700">
-          {error.message}
+          {error?.message || taskError?.message}
         </div>
       )}
 
-      <div className="mt-8 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
-        <InsightCard
-          label="Total Orders"
-          value={totalOrders}
-          helper={`${activeOrders.length} active orders`}
-        />
-
-        <InsightCard
-          label="Total Value"
-          value={formatCurrency(totalValue)}
-          helper="All orders combined"
-        />
-
-        <InsightCard
-          label="Active Value"
-          value={formatCurrency(activeValue)}
-          helper="Not delivered or cancelled"
-          tone="orange"
-        />
-
-        <InsightCard
-          label="Delivered Value"
-          value={formatCurrency(deliveredValue)}
-          helper={`${deliveredOrders.length} delivered orders`}
-          tone="green"
-        />
-      </div>
-
-      <div className="mt-5 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
-        <InsightCard
-          label="Pending Dispatch"
-          value={pendingDispatchOrders.length}
-          helper="New, in progress, or on hold"
-          tone="orange"
-        />
-
-        <InsightCard
-          label="Orders Without PO"
-          value={ordersWithoutPo.length}
-          helper="Need PO upload or PO link"
-          tone={ordersWithoutPo.length > 0 ? "red" : "green"}
-        />
-
-        <InsightCard
-          label="Average Order Value"
-          value={formatCurrency(averageOrderValue)}
-          helper="Based on all orders"
-          tone="blue"
-        />
-
-        <InsightCard
-          label="Cancelled Value"
-          value={formatCurrency(cancelledValue)}
-          helper={`${cancelledOrders.length} cancelled orders`}
-          tone={cancelledOrders.length > 0 ? "red" : "default"}
-        />
+      <div className="mt-7 grid gap-4 sm:grid-cols-3">
+        <SignalCard label="Open" value={openCount} tone="amber" />
+        <SignalCard label="Delivered" value={deliveredCount} tone="green" />
+        <SignalCard label="Cancelled" value={cancelledCount} tone="red" />
       </div>
 
       <StatusFilterBar
@@ -314,161 +273,78 @@ export default async function WorkflowOrdersPage({
         currentStatus={statusFilter}
         statuses={orderStatuses}
       />
-            <section className="rounded-2xl border bg-background">
-        <div className="border-b p-5">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <h2 className="text-xl font-bold">Order List</h2>
 
-              <p className="mt-1 text-sm text-muted-foreground">
-                Filtered by: {statusFilter}
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="rounded-2xl border bg-muted/30 px-4 py-3 text-right">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Showing
-                </p>
-
-                <p className="mt-1 text-sm font-bold">
-                  {allOrders.length} of {totalFilteredOrders} orders
-                </p>
-              </div>
-
-              {totalPages > 1 && (
-                <div className="flex items-center gap-2 rounded-2xl border bg-muted/30 px-3 py-3">
-                  <a
-                    href={
-                      safeCurrentPage <= 1
-                        ? "#"
-                        : statusFilter === "All"
-                          ? `/admin/workflow/orders?page=${safeCurrentPage - 1}`
-                          : `/admin/workflow/orders?status=${encodeURIComponent(
-                              statusFilter
-                            )}&page=${safeCurrentPage - 1}`
-                    }
-                    className={
-                      safeCurrentPage <= 1
-                        ? "pointer-events-none rounded-xl border px-3 py-2 text-xs font-semibold text-muted-foreground opacity-50"
-                        : "rounded-xl border px-3 py-2 text-xs font-semibold hover:bg-muted"
-                    }
-                  >
-                    Prev
-                  </a>
-
-                  <span className="px-2 text-sm font-bold">
-                    {safeCurrentPage} / {totalPages}
-                  </span>
-
-                  <a
-                    href={
-                      safeCurrentPage >= totalPages
-                        ? "#"
-                        : statusFilter === "All"
-                          ? `/admin/workflow/orders?page=${safeCurrentPage + 1}`
-                          : `/admin/workflow/orders?status=${encodeURIComponent(
-                              statusFilter
-                            )}&page=${safeCurrentPage + 1}`
-                    }
-                    className={
-                      safeCurrentPage >= totalPages
-                        ? "pointer-events-none rounded-xl border px-3 py-2 text-xs font-semibold text-muted-foreground opacity-50"
-                        : "rounded-xl border px-3 py-2 text-xs font-semibold hover:bg-muted"
-                    }
-                  >
-                    Next
-                  </a>
-                </div>
-              )}
-            </div>
+      <section className="rounded-2xl border bg-background">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b p-5">
+          <div>
+            <h2 className="text-xl font-bold">Order List</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {totalFilteredOrders} orders · Filter: {statusFilter}
+            </p>
           </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center gap-2">
+              <a
+                href={safeCurrentPage <= 1 ? "#" : buildPageHref({ statusFilter, page: safeCurrentPage - 1 })}
+                className={safeCurrentPage <= 1 ? "pointer-events-none rounded-xl border px-3 py-2 text-xs font-semibold opacity-40" : "rounded-xl border px-3 py-2 text-xs font-semibold hover:bg-muted"}
+              >
+                Prev
+              </a>
+              <span className="text-sm font-bold">{safeCurrentPage} / {totalPages}</span>
+              <a
+                href={safeCurrentPage >= totalPages ? "#" : buildPageHref({ statusFilter, page: safeCurrentPage + 1 })}
+                className={safeCurrentPage >= totalPages ? "pointer-events-none rounded-xl border px-3 py-2 text-xs font-semibold opacity-40" : "rounded-xl border px-3 py-2 text-xs font-semibold hover:bg-muted"}
+              >
+                Next
+              </a>
+            </div>
+          )}
         </div>
 
         <div className="divide-y">
-          {allOrders.map((order: any) => (
-            <div key={order.id} className="p-5">
-              <div className="grid gap-5 xl:grid-cols-[1.2fr_1.2fr_1fr_1fr_1.1fr]">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-mono text-xs font-semibold text-muted-foreground">
-                      {order.order_code}
-                    </p>
+          {allOrders.map((order: any) => {
+            const relatedTasks = tasksByOrder.get(order.id) || []
 
-                    <StatusPill label={order.status || "New"} />
+            return (
+              <article key={order.id} className="p-5">
+                <div className="grid gap-5 xl:grid-cols-[1.35fr_1fr_1fr_230px]">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-mono text-xs font-semibold text-muted-foreground">{order.order_code}</p>
+                      <StatusPill label={order.status || "New"} />
+                    </div>
+                    <h3 className="mt-2 text-lg font-bold">{order.client_name}</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">{order.product_name || "No product details"}</p>
+                    <p className="mt-3 text-xs text-muted-foreground">Order date: {order.order_date || "—"}</p>
                   </div>
 
-                  <h3 className="mt-2 text-base font-bold">
-                    {order.client_name}
-                  </h3>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Commercial</p>
+                    <p className="mt-2 text-sm">Quantity: <span className="font-semibold">{order.quantity || "—"}</span></p>
+                    <p className="mt-1 text-sm">Rate: <span className="font-semibold">{formatCurrency(order.sale_price)}</span></p>
+                    <p className="mt-1 text-base font-bold">Value: {formatCurrency(order.order_value)}</p>
+                  </div>
 
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Date: {order.order_date || "—"}
-                  </p>
-                </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Operations</p>
+                    <p className="mt-2 text-sm text-muted-foreground">{order.remarks || "No remarks"}</p>
+                    <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Purchase Order</p>
+                    {order.po_url ? (
+                      <a
+                        href={order.po_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 inline-flex text-sm font-semibold text-blue-600 hover:underline"
+                      >
+                        View PO
+                      </a>
+                    ) : (
+                      <p className="mt-1 text-sm font-semibold text-amber-700">PO not added</p>
+                    )}
+                  </div>
 
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Product
-                  </p>
-
-                  <p className="mt-1 text-base font-bold">
-                    {order.product_name || "—"}
-                  </p>
-
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Qty:{" "}
-                    <span className="font-semibold text-foreground">
-                      {order.quantity || "—"}
-                    </span>
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Value
-                  </p>
-
-                  <p className="mt-1 text-lg font-bold">
-                    {formatRateCurrency(order.order_value)}
-                  </p>
-
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Rate: {formatRateCurrency(order.sale_price)}
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Remark
-                  </p>
-
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {order.remarks || "—"}
-                  </p>
-
-                  <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    PO
-                  </p>
-
-                  {order.po_url ? (
-                    <a
-                      href={order.po_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-1 inline-flex text-sm font-semibold text-blue-600 hover:underline"
-                    >
-                      View PO
-                    </a>
-                  ) : (
-                    <p className="mt-1 text-sm font-semibold text-orange-600">
-                      Missing PO
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex justify-start xl:justify-end">
-                  <div className="ml-auto flex w-full max-w-[210px] flex-col items-end gap-2">
+                  <div className="flex flex-col gap-2">
                     <OrderActions
                       orderId={order.id}
                       orderCode={order.order_code}
@@ -477,18 +353,17 @@ export default async function WorkflowOrdersPage({
                       teamMembers={activeTeamMembers}
                       canDelete={canDelete}
                     />
-
                     {canEdit && <EditOrderButton order={order} />}
                   </div>
                 </div>
-              </div>
-            </div>
-          ))}
+
+                <RelatedTasks tasks={relatedTasks} />
+              </article>
+            )
+          })}
 
           {allOrders.length === 0 && (
-            <div className="p-10 text-center text-muted-foreground">
-              No orders found.
-            </div>
+            <div className="p-10 text-center text-muted-foreground">No orders found.</div>
           )}
         </div>
       </section>
