@@ -311,12 +311,20 @@ export default async function WorkflowEnquiriesPage({
                     <p className="mt-1 text-sm text-muted-foreground">
                       {enquiry.product_names || "No product details"}
                     </p>
-                    <p className="mt-3 text-xs text-muted-foreground">
-                      Owner: <span className="font-semibold text-foreground">{owner?.name || "Unassigned"}</span>
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Phone: {enquiry.client_phone || "—"} · Email: {enquiry.client_email || "—"}
-                    </p>
+                    <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+                      <p>
+                        <span className="font-semibold text-foreground">Enquiry Owner:</span>{" "}
+                        {owner?.name || "Unassigned"}
+                      </p>
+                      <p>
+                        <span className="font-semibold text-foreground">Client Phone:</span>{" "}
+                        {enquiry.client_phone || "—"}
+                      </p>
+                      <p>
+                        <span className="font-semibold text-foreground">Client Email:</span>{" "}
+                        {enquiry.client_email || "—"}
+                      </p>
+                    </div>
                   </div>
 
                   <div>

@@ -50,15 +50,17 @@ function SignalCard({
   tone,
 }: {
   label: string
-  value: number
-  tone: "amber" | "green" | "red"
+  value: string | number
+  tone: "slate" | "amber" | "green" | "red"
 }) {
   const classes =
     tone === "green"
       ? "border-green-200 bg-green-50/60 text-green-700"
       : tone === "red"
         ? "border-red-200 bg-red-50/60 text-red-700"
-        : "border-amber-200 bg-amber-50/60 text-amber-700"
+        : tone === "amber"
+          ? "border-amber-200 bg-amber-50/60 text-amber-700"
+          : "border-slate-200 bg-slate-50/60 text-slate-700"
 
   return (
     <div className={`rounded-2xl border p-5 ${classes}`}>
@@ -66,7 +68,7 @@ function SignalCard({
         <span className="h-2.5 w-2.5 rounded-full bg-current" />
         <p className="text-xs font-bold uppercase tracking-wide">{label}</p>
       </div>
-      <p className="mt-3 text-3xl font-bold">{value}</p>
+      <p className="mt-3 text-2xl font-bold sm:text-3xl">{value}</p>
     </div>
   )
 }
@@ -237,11 +239,19 @@ export default async function WorkflowOrdersPage({
   const startIndex = (safeCurrentPage - 1) * pageSize
   const allOrders = filteredOrders.slice(startIndex, startIndex + pageSize)
 
-  const openCount = allOrdersRaw.filter(
-    (order) => !["Delivered", "Cancelled"].includes(order.status || "New")
-  ).length
-  const deliveredCount = allOrdersRaw.filter((order) => order.status === "Delivered").length
-  const cancelledCount = allOrdersRaw.filter((order) => order.status === "Cancelled").length
+  const totalOrders = allOrdersRaw.length
+  const totalOrderValue = allOrdersRaw.reduce(
+    (sum, order) => sum + Number(order.order_value || 0),
+    0
+  )
+  const deliveredOrders = allOrdersRaw.filter(
+    (order) => order.status === "Delivered"
+  )
+  const deliveredCount = deliveredOrders.length
+  const deliveredValue = deliveredOrders.reduce(
+    (sum, order) => sum + Number(order.order_value || 0),
+    0
+  )
 
   return (
     <div className="max-w-full overflow-hidden">
@@ -262,10 +272,19 @@ export default async function WorkflowOrdersPage({
         </div>
       )}
 
-      <div className="mt-7 grid gap-4 sm:grid-cols-3">
-        <SignalCard label="Open" value={openCount} tone="amber" />
-        <SignalCard label="Delivered" value={deliveredCount} tone="green" />
-        <SignalCard label="Cancelled" value={cancelledCount} tone="red" />
+      <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <SignalCard label="Orders Received" value={totalOrders} tone="slate" />
+        <SignalCard
+          label="Total Order Value"
+          value={formatCurrency(totalOrderValue)}
+          tone="amber"
+        />
+        <SignalCard label="Delivered Orders" value={deliveredCount} tone="green" />
+        <SignalCard
+          label="Delivered Value"
+          value={formatCurrency(deliveredValue)}
+          tone="green"
+        />
       </div>
 
       <StatusFilterBar
