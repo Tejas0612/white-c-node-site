@@ -4,7 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
-import { supabase } from "@/lib/supabase"
+import { createProduct } from "../actions"
 
 export default function NewProductPage() {
   const router = useRouter()
@@ -20,7 +20,7 @@ export default function NewProductPage() {
     setLoading(true)
     setError("")
 
-    const payload = {
+    const result = await createProduct({
       sku: formData.get("sku"),
       name: formData.get("name"),
       category: formData.get("category"),
@@ -35,14 +35,12 @@ export default function NewProductPage() {
       image_url: formData.get("image_url"),
       is_active: formData.get("is_active") === "on",
       is_featured: formData.get("is_featured") === "on",
-    }
-
-    const { error } = await supabase.from("products").insert(payload)
+    })
 
     setLoading(false)
 
-    if (error) {
-      setError(error.message)
+    if (!result.success) {
+      setError(result.message)
       return
     }
 

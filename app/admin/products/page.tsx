@@ -1,18 +1,20 @@
 import Link from "next/link"
-import { supabase } from "@/lib/supabase"
+import { requireAdminUser } from "@/lib/admin-auth"
+import { supabaseAdmin } from "@/lib/supabase-admin"
 import { DeleteProductButton } from "@/components/admin/delete-product-button"
 
 export const dynamic = "force-dynamic"
 
 export default async function AdminProductsPage() {
-  const { data: products, error } = await supabase
+  await requireAdminUser(["Owner", "Admin"])
+
+  const { data: products, error } = await supabaseAdmin
     .from("products")
     .select("*")
     .order("created_at", { ascending: false })
 
   return (
     <div className="flex min-h-screen flex-col">
-
       <main className="flex-1 px-6 py-16">
         <div className="mx-auto max-w-7xl">
           <div className="flex flex-wrap items-center justify-between gap-4">
@@ -47,7 +49,7 @@ export default async function AdminProductsPage() {
 
           {error && (
             <div className="mt-8 rounded-2xl border border-red-200 bg-red-50 p-5 text-red-700">
-              {error.message}
+              Unable to load products right now.
             </div>
           )}
 
@@ -70,13 +72,25 @@ export default async function AdminProductsPage() {
                 {products && products.length > 0 ? (
                   products.map((product) => (
                     <tr key={product.id} className="border-t">
-                      <td className="p-4 text-muted-foreground">{product.sku || "-"}</td>
+                      <td className="p-4 text-muted-foreground">
+                        {product.sku || "-"}
+                      </td>
                       <td className="p-4 font-medium">{product.name}</td>
-                      <td className="p-4 text-muted-foreground">{product.category}</td>
-                      <td className="p-4 text-muted-foreground">{product.budget_band}</td>
-                      <td className="p-4 text-muted-foreground">{product.moq || "-"}</td>
-                      <td className="p-4">{product.is_active ? "Yes" : "No"}</td>
-                      <td className="p-4">{product.is_featured ? "Yes" : "No"}</td>
+                      <td className="p-4 text-muted-foreground">
+                        {product.category}
+                      </td>
+                      <td className="p-4 text-muted-foreground">
+                        {product.budget_band}
+                      </td>
+                      <td className="p-4 text-muted-foreground">
+                        {product.moq || "-"}
+                      </td>
+                      <td className="p-4">
+                        {product.is_active ? "Yes" : "No"}
+                      </td>
+                      <td className="p-4">
+                        {product.is_featured ? "Yes" : "No"}
+                      </td>
                       <td className="p-4">
                         <div className="flex gap-2">
                           <Link
@@ -103,7 +117,6 @@ export default async function AdminProductsPage() {
           </div>
         </div>
       </main>
-
     </div>
   )
 }

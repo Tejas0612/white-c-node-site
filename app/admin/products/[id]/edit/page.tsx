@@ -4,7 +4,25 @@ import { useEffect, useState } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
-import { supabase } from "@/lib/supabase"
+import { getProductForEdit, updateProduct } from "../../actions"
+
+type EditableProduct = {
+  id: string
+  sku: string | null
+  name: string | null
+  category: string | null
+  budget_band: string | null
+  occasion: string | null
+  recipient_type: string | null
+  material: string | null
+  moq: string | null
+  branding_available: string | null
+  lead_time: string | null
+  description: string | null
+  image_url: string | null
+  is_active: boolean | null
+  is_featured: boolean | null
+}
 
 export default function EditProductPage() {
   const router = useRouter()
@@ -14,26 +32,25 @@ export default function EditProductPage() {
   const [loading, setLoading] = useState(false)
   const [pageLoading, setPageLoading] = useState(true)
   const [error, setError] = useState("")
-  const [product, setProduct] = useState<any>(null)
+  const [product, setProduct] = useState<EditableProduct | null>(null)
 
   useEffect(() => {
     async function fetchProduct() {
-      const { data, error } = await supabase
-        .from("products")
-        .select("*")
-        .eq("id", productId)
-        .single()
+      const result = await getProductForEdit(productId)
 
-      if (error) {
-        setError(error.message)
+      if (!result.success || !result.product) {
+        setError(result.message)
+        setProduct(null)
       } else {
-        setProduct(data)
+        setProduct(result.product as EditableProduct)
       }
 
       setPageLoading(false)
     }
 
-    if (productId) fetchProduct()
+    if (productId) {
+      void fetchProduct()
+    }
   }, [productId])
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -45,7 +62,7 @@ export default function EditProductPage() {
     setLoading(true)
     setError("")
 
-    const payload = {
+    const result = await updateProduct(productId, {
       sku: formData.get("sku"),
       name: formData.get("name"),
       category: formData.get("category"),
@@ -60,17 +77,12 @@ export default function EditProductPage() {
       image_url: formData.get("image_url"),
       is_active: formData.get("is_active") === "on",
       is_featured: formData.get("is_featured") === "on",
-    }
-
-    const { error } = await supabase
-      .from("products")
-      .update(payload)
-      .eq("id", productId)
+    })
 
     setLoading(false)
 
-    if (error) {
-      setError(error.message)
+    if (!result.success) {
+      setError(result.message)
       return
     }
 
@@ -98,7 +110,9 @@ export default function EditProductPage() {
         <Navbar />
         <main className="flex-1 px-6 py-16">
           <div className="mx-auto max-w-4xl">
-            <p className="text-red-600">Product not found.</p>
+            <p className="text-red-600">
+              {error || "Product not found."}
+            </p>
           </div>
         </main>
         <Footer />
@@ -229,7 +243,7 @@ export default function EditProductPage() {
                 <input
                   name="is_active"
                   type="checkbox"
-                  defaultChecked={product.is_active}
+                  defaultChecked={Boolean(product.is_active)}
                 />
                 <span>Active</span>
               </label>
@@ -238,7 +252,7 @@ export default function EditProductPage() {
                 <input
                   name="is_featured"
                   type="checkbox"
-                  defaultChecked={product.is_featured}
+                  defaultChecked={Boolean(product.is_featured)}
                 />
                 <span>Featured</span>
               </label>

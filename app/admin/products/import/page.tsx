@@ -5,7 +5,6 @@ import Link from "next/link"
 import Papa from "papaparse"
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
-import { supabase } from "@/lib/supabase"
 
 type CsvRow = {
   brand?: string
@@ -189,19 +188,31 @@ export default function ImportProductsPage() {
     setError("")
     setMessage("")
 
-    const { error } = await supabase
-      .from("products")
-      .upsert(rows, { onConflict: "sku" })
+    try {
+      const response = await fetch("/api/admin/brochure/import", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          products: rows,
+        }),
+      })
 
-    setLoading(false)
+      const result = await response.json()
 
-    if (error) {
-      setError(error.message)
-      return
+      if (!response.ok || !result?.success) {
+        setError(result?.message || "Unable to import products.")
+        return
+      }
+
+      setMessage(`${result.count} products imported/updated successfully.`)
+      setRows([])
+    } catch {
+      setError("Unable to import products right now.")
+    } finally {
+      setLoading(false)
     }
-
-    setMessage(`${rows.length} products imported/updated successfully.`)
-    setRows([])
   }
 
   return (
@@ -278,6 +289,10 @@ export default function ImportProductsPage() {
               <p className="mt-2">
                 Tags are selected using tag_1 to tag_5. These are combined and
                 stored as one tags field in Supabase.
+              </p>
+
+              <p className="mt-2">
+                Import up to 200 products at a time.
               </p>
             </div>
 

@@ -2,28 +2,27 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { supabase } from "@/lib/supabase"
+import { deleteProduct } from "@/app/admin/products/actions"
 
 export function DeleteProductButton({ productId }: { productId: string }) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
 
   async function handleDelete() {
-    const confirmed = window.confirm("Are you sure you want to delete this product?")
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this product?"
+    )
 
     if (!confirmed) return
 
     setLoading(true)
 
-    const { error } = await supabase
-      .from("products")
-      .delete()
-      .eq("id", productId)
+    const result = await deleteProduct(productId)
 
     setLoading(false)
 
-    if (error) {
-      alert(error.message)
+    if (!result.success) {
+      window.alert(result.message)
       return
     }
 
