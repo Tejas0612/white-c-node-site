@@ -24,9 +24,7 @@ export function Navbar() {
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/80 bg-background/80 backdrop-blur-md">
       <nav className="mx-auto flex h-20 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-        <Link href="/" onClick={() => setOpen(false)}>
-          <Logo />
-        </Link>
+        <Logo />
 
         <div className="hidden items-center gap-1 md:flex">
           {NAV_LINKS.map((link) => (

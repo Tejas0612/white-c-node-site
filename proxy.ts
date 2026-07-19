@@ -2,12 +2,33 @@ import { NextRequest, NextResponse } from "next/server"
 
 const ADMIN_SESSION_COOKIE = "whitec_admin_session"
 
-const publicAdminPaths = [
+const publicAdminPaths = new Set([
   "/admin/login",
   "/api/admin/login",
   "/api/admin/logout",
-  "/api/admin/set-password",
-]
+])
+
+function isPublicAdminPath(pathname: string) {
+  return (
+    publicAdminPaths.has(pathname) ||
+    [...publicAdminPaths].some((path) => pathname === `${path}/`)
+  )
+}
+
+function unauthorizedJson() {
+  return NextResponse.json(
+    {
+      success: false,
+      message: "Unauthorized.",
+    },
+    {
+      status: 401,
+      headers: {
+        "Cache-Control": "no-store, max-age=0",
+      },
+    }
+  )
+}
 
 async function isValidAdminSession(sessionToken: string) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -18,7 +39,9 @@ async function isValidAdminSession(sessionToken: string) {
   }
 
   const response = await fetch(
-    `${supabaseUrl}/rest/v1/admin_sessions?select=id,expires_at,admin_users(is_active)&session_token=eq.${sessionToken}&expires_at=gt.${new Date().toISOString()}`,
+    `${supabaseUrl}/rest/v1/admin_sessions?select=id,expires_at,admin_users(is_active)&session_token=eq.${encodeURIComponent(
+      sessionToken
+    )}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}`,
     {
       headers: {
         apikey: serviceRoleKey,
@@ -46,11 +69,7 @@ async function isValidAdminSession(sessionToken: string) {
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname
 
-  const isPublicAdminPath = publicAdminPaths.some((path) =>
-    pathname.startsWith(path)
-  )
-
-  if (isPublicAdminPath) {
+  if (isPublicAdminPath(pathname)) {
     return NextResponse.next()
   }
 
@@ -65,13 +84,7 @@ export async function proxy(request: NextRequest) {
 
   if (!sessionToken) {
     if (isAdminApiPath) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Unauthorized.",
-        },
-        { status: 401 }
-      )
+      return unauthorizedJson()
     }
 
     return NextResponse.redirect(new URL("/admin/login", request.url))
@@ -81,16 +94,18 @@ export async function proxy(request: NextRequest) {
 
   if (!validSession) {
     const response = isAdminApiPath
-      ? NextResponse.json(
-          {
-            success: false,
-            message: "Unauthorized.",
-          },
-          { status: 401 }
-        )
+      ? unauthorizedJson()
       : NextResponse.redirect(new URL("/admin/login", request.url))
 
-    response.cookies.delete(ADMIN_SESSION_COOKIE)
+    response.cookies.set(ADMIN_SESSION_COOKIE, "", {
+      path: "/",
+      maxAge: 0,
+      expires: new Date(0),
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      priority: "high",
+    })
 
     return response
   }

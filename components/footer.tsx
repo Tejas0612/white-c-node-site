@@ -38,9 +38,7 @@ export function Footer() {
       <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
         <div className="grid gap-10 lg:grid-cols-[1.5fr_1fr_1fr_1fr]">
           <div className="max-w-sm">
-            <Link href="/">
-              <Logo />
-            </Link>
+            <Logo />
 
             <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
               AI-powered corporate gifting for every budget, team, and occasion.
