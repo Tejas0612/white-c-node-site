@@ -1,6 +1,23 @@
+import { requireAdminUser } from "@/lib/admin-auth"
 import { supabaseAdmin } from "@/lib/supabase-admin"
 
 export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
+const MAX_REQUEST_BYTES = 2_000_000
+const MAX_PRODUCTS_PER_IMPORT = 200
+
+function jsonResponse(
+  body: Record<string, unknown>,
+  status = 200
+) {
+  return Response.json(body, {
+    status,
+    headers: {
+      "Cache-Control": "no-store, max-age=0",
+    },
+  })
+}
 
 function slugify(value: unknown) {
   return String(value || "")
@@ -38,17 +55,68 @@ function cleanFeatures(value: unknown) {
 }
 
 export async function POST(request: Request) {
-  try {
-    const { products } = await request.json()
+  await requireAdminUser(["Owner", "Admin"])
 
-    if (!Array.isArray(products) || products.length === 0) {
-      return Response.json(
-        { success: false, message: "No products provided." },
-        { status: 400 }
+  try {
+    const contentLength = Number(request.headers.get("content-length") || 0)
+
+    if (contentLength > MAX_REQUEST_BYTES) {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Import request is too large.",
+        },
+        413
       )
     }
 
-    const rows = products.map((product) => {
+    let requestBody: unknown
+
+    try {
+      requestBody = await request.json()
+    } catch {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Invalid import request.",
+        },
+        400
+      )
+    }
+
+    if (!requestBody || typeof requestBody !== "object") {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Invalid import request.",
+        },
+        400
+      )
+    }
+
+    const { products } = requestBody as { products?: unknown }
+
+    if (!Array.isArray(products) || products.length === 0) {
+      return jsonResponse(
+        {
+          success: false,
+          message: "No products provided.",
+        },
+        400
+      )
+    }
+
+    if (products.length > MAX_PRODUCTS_PER_IMPORT) {
+      return jsonResponse(
+        {
+          success: false,
+          message: `Import a maximum of ${MAX_PRODUCTS_PER_IMPORT} products at a time.`,
+        },
+        400
+      )
+    }
+
+    const rows = products.map((product: any) => {
       const sku = createBrochureSku(product)
 
       return {
@@ -90,6 +158,16 @@ export async function POST(request: Request) {
       }
     })
 
+    if (rows.some((row) => !row.sku || !row.name)) {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Every product must have a valid name and brochure reference.",
+        },
+        400
+      )
+    }
+
     const { error } = await supabaseAdmin
       .from("products")
       .upsert(rows, {
@@ -97,65 +175,89 @@ export async function POST(request: Request) {
       })
 
     if (error) {
-      return Response.json(
-        { success: false, message: error.message },
-        { status: 500 }
+      console.error("Brochure product upsert failed:", error)
+
+      return jsonResponse(
+        {
+          success: false,
+          message: "Unable to import products right now.",
+        },
+        500
       )
     }
 
     for (let index = 0; index < products.length; index++) {
-      const product = products[index]
+      const product = products[index] as any
       const sku = createBrochureSku(product)
       const imageUrl = cleanText(product.image_url)
       const imageFilename = cleanText(product.image_filename)
       const features = cleanFeatures(product.features)
 
       if (imageUrl) {
-        await supabaseAdmin
+        const { error: deleteImageError } = await supabaseAdmin
           .from("product_images")
           .delete()
           .eq("product_sku", sku)
           .eq("sort_order", 1)
 
-        await supabaseAdmin.from("product_images").insert({
-          product_sku: sku,
-          image_url: imageUrl,
-          image_filename: imageFilename,
-          image_type: "main",
-          sort_order: 1,
-        })
+        if (deleteImageError) {
+          console.error("Product image cleanup failed:", deleteImageError)
+        }
+
+        const { error: imageInsertError } = await supabaseAdmin
+          .from("product_images")
+          .insert({
+            product_sku: sku,
+            image_url: imageUrl,
+            image_filename: imageFilename,
+            image_type: "main",
+            sort_order: 1,
+          })
+
+        if (imageInsertError) {
+          console.error("Product image insert failed:", imageInsertError)
+        }
       }
 
-      await supabaseAdmin
+      const { error: deleteFeaturesError } = await supabaseAdmin
         .from("product_features")
         .delete()
         .eq("product_sku", sku)
 
+      if (deleteFeaturesError) {
+        console.error("Product feature cleanup failed:", deleteFeaturesError)
+      }
+
       if (features.length > 0) {
-        await supabaseAdmin.from("product_features").insert(
-          features.map((feature, featureIndex) => ({
-            product_sku: sku,
-            feature_text: feature,
-            sort_order: featureIndex + 1,
-          }))
-        )
+        const { error: featureInsertError } = await supabaseAdmin
+          .from("product_features")
+          .insert(
+            features.map((feature, featureIndex) => ({
+              product_sku: sku,
+              feature_text: feature,
+              sort_order: featureIndex + 1,
+            }))
+          )
+
+        if (featureInsertError) {
+          console.error("Product feature insert failed:", featureInsertError)
+        }
       }
     }
 
-    return Response.json({
+    return jsonResponse({
       success: true,
       count: rows.length,
     })
-  } catch (error: any) {
+  } catch (error) {
     console.error("Brochure import error:", error)
 
-    return Response.json(
+    return jsonResponse(
       {
         success: false,
-        message:
-          error?.message || "Something went wrong while importing products.",
+        message: "Something went wrong while importing products.",
       },
-      { status: 500 }
+      500
     )
   }
 }

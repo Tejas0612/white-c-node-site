@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import crypto from "crypto"
 import { supabaseAdmin } from "@/lib/supabase-admin"
 
 function cleanText(value: string | number | null | undefined) {
@@ -165,6 +166,47 @@ async function findTaskByReference(
     })
 
   return null
+}
+
+function getWhatsAppAppSecret() {
+  return cleanText(
+    process.env.WHATSAPP_APP_SECRET ||
+      process.env.META_APP_SECRET
+  )
+}
+
+function verifyMetaWebhookSignature(
+  rawBody: string,
+  signatureHeader: string | null
+) {
+  const appSecret = getWhatsAppAppSecret()
+
+  if (
+    !appSecret ||
+    !signatureHeader ||
+    !signatureHeader.startsWith("sha256=")
+  ) {
+    return false
+  }
+
+  const receivedHex = signatureHeader.slice("sha256=".length)
+
+  if (!/^[a-f0-9]{64}$/i.test(receivedHex)) {
+    return false
+  }
+
+  const expectedHex = crypto
+    .createHmac("sha256", appSecret)
+    .update(rawBody, "utf8")
+    .digest("hex")
+
+  const receivedBuffer = Buffer.from(receivedHex, "hex")
+  const expectedBuffer = Buffer.from(expectedHex, "hex")
+
+  return (
+    receivedBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(receivedBuffer, expectedBuffer)
+  )
 }
 
 export async function GET(request: Request) {
@@ -560,7 +602,42 @@ async function handleTaskReply({
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json()
+    const rawBody = await request.text()
+    const signatureHeader = request.headers.get("x-hub-signature-256")
+
+    if (!verifyMetaWebhookSignature(rawBody, signatureHeader)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid webhook signature.",
+        },
+        {
+          status: 401,
+          headers: {
+            "Cache-Control": "no-store, max-age=0",
+          },
+        }
+      )
+    }
+
+    let body: any
+
+    try {
+      body = JSON.parse(rawBody)
+    } catch {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid webhook payload.",
+        },
+        {
+          status: 400,
+          headers: {
+            "Cache-Control": "no-store, max-age=0",
+          },
+        }
+      )
+    }
 
     await supabaseAdmin
       .from("whatsapp_webhook_events")

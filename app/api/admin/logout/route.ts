@@ -1,65 +1,54 @@
-import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
+import { NextResponse } from "next/server"
 import { supabaseAdmin } from "@/lib/supabase-admin"
+import { ADMIN_SESSION_COOKIE } from "@/lib/admin-auth"
 
-const possibleSessionCookieNames = [
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
+const legacySessionCookieNames = [
   "admin_session",
   "admin_session_token",
-  "whitec_admin_session",
   "whitec_admin_session_token",
 ]
 
-async function clearAdminSession() {
-  const cookieStore = await cookies()
-
-  for (const cookieName of possibleSessionCookieNames) {
-    const sessionToken = cookieStore.get(cookieName)?.value
-
-    if (sessionToken) {
-      await supabaseAdmin
-        .from("admin_sessions")
-        .delete()
-        .eq("session_token", sessionToken)
-    }
-
-    cookieStore.delete(cookieName)
-  }
-}
+const sessionCookieNames = [
+  ADMIN_SESSION_COOKIE,
+  ...legacySessionCookieNames,
+]
 
 export async function POST(request: Request) {
-  await clearAdminSession()
+  const cookieStore = await cookies()
+  const sessionTokens = sessionCookieNames
+    .map((cookieName) => cookieStore.get(cookieName)?.value)
+    .filter((token): token is string => Boolean(token))
 
-  const response = NextResponse.redirect(new URL("/admin/login", request.url), {
-    status: 303,
-  })
+  if (sessionTokens.length > 0) {
+    const { error } = await supabaseAdmin
+      .from("admin_sessions")
+      .delete()
+      .in("session_token", sessionTokens)
 
-  for (const cookieName of possibleSessionCookieNames) {
-    response.cookies.set(cookieName, "", {
-      path: "/",
-      maxAge: 0,
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-    })
+    if (error) {
+      console.error("Admin session deletion failed:", error)
+    }
   }
 
-  return response
-}
-
-export async function GET(request: Request) {
-  await clearAdminSession()
-
   const response = NextResponse.redirect(new URL("/admin/login", request.url), {
     status: 303,
   })
 
-  for (const cookieName of possibleSessionCookieNames) {
+  response.headers.set("Cache-Control", "no-store, max-age=0")
+
+  for (const cookieName of sessionCookieNames) {
     response.cookies.set(cookieName, "", {
       path: "/",
       maxAge: 0,
+      expires: new Date(0),
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
+      priority: "high",
     })
   }
 

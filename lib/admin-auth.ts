@@ -16,14 +16,18 @@ export type AdminUser = {
 
 export function hasAllowedRole(
   userRoles: string[] | null | undefined,
-  allowedRoles: string[]
+  allowedRoles: string[],
+  primaryRole?: string | null
 ) {
-  const roles = userRoles || []
+  const roles = new Set([
+    ...(userRoles || []),
+    ...(primaryRole ? [primaryRole] : []),
+  ])
 
   return (
-    roles.includes("Owner") ||
-    roles.includes("Admin") ||
-    roles.some((role) => allowedRoles.includes(role))
+    roles.has("Owner") ||
+    roles.has("Admin") ||
+    allowedRoles.some((role) => roles.has(role))
   )
 }
 
@@ -79,7 +83,7 @@ export async function requireAdminUser(allowedRoles?: string[]) {
   }
 
   if (allowedRoles && allowedRoles.length > 0) {
-    const allowed = hasAllowedRole(user.roles, allowedRoles)
+    const allowed = hasAllowedRole(user.roles, allowedRoles, user.role)
 
     if (!allowed) {
       redirect("/admin/unauthorized")

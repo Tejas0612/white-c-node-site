@@ -5,6 +5,7 @@ import { execFile } from "child_process"
 import { promisify } from "util"
 import sharp from "sharp"
 import OpenAI from "openai"
+import { requireAdminUser } from "@/lib/admin-auth"
 import { supabaseAdmin } from "@/lib/supabase-admin"
 
 export const runtime = "nodejs"
@@ -426,6 +427,8 @@ Rules:
 }
 
 export async function POST(request: Request) {
+  await requireAdminUser(["Owner", "Admin"])
+
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "brochure-import-"))
 
   try {
@@ -433,7 +436,7 @@ export async function POST(request: Request) {
       return Response.json(
         {
           success: false,
-          message: "OPENAI_API_KEY is missing in .env.local.",
+          message: "Brochure extraction is not configured.",
         },
         { status: 500 }
       )
@@ -443,7 +446,7 @@ export async function POST(request: Request) {
       return Response.json(
         {
           success: false,
-          message: "SUPABASE_SERVICE_ROLE_KEY is missing in .env.local.",
+          message: "Brochure extraction is not configured.",
         },
         { status: 500 }
       )

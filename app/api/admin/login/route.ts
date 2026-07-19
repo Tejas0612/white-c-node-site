@@ -5,59 +5,96 @@ import { supabaseAdmin } from "@/lib/supabase-admin"
 import { ADMIN_SESSION_COOKIE } from "@/lib/admin-auth"
 
 export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
+const noStoreHeaders = {
+  "Cache-Control": "no-store, max-age=0",
+}
+
+function jsonResponse(
+  body: Record<string, unknown>,
+  status: number
+) {
+  return Response.json(body, {
+    status,
+    headers: noStoreHeaders,
+  })
+}
+
+function invalidCredentialsResponse() {
+  return jsonResponse(
+    {
+      success: false,
+      message: "Invalid email or password.",
+    },
+    401
+  )
+}
 
 export async function POST(request: Request) {
   try {
-    const { email, password } = await request.json()
+    let requestBody: unknown
+
+    try {
+      requestBody = await request.json()
+    } catch {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Invalid login request.",
+        },
+        400
+      )
+    }
+
+    if (!requestBody || typeof requestBody !== "object") {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Invalid login request.",
+        },
+        400
+      )
+    }
+
+    const { email: rawEmail, password: rawPassword } = requestBody as {
+      email?: unknown
+      password?: unknown
+    }
+
+    const email =
+      typeof rawEmail === "string" ? rawEmail.toLowerCase().trim() : ""
+    const password = typeof rawPassword === "string" ? rawPassword : ""
 
     if (!email || !password) {
-      return Response.json(
+      return jsonResponse(
         {
           success: false,
           message: "Email and password are required.",
         },
-        { status: 400 }
+        400
       )
+    }
+
+    if (email.length > 254 || password.length > 200) {
+      return invalidCredentialsResponse()
     }
 
     const { data: user, error } = await supabaseAdmin
       .from("admin_users")
-      .select("*")
-      .eq("email", String(email).toLowerCase().trim())
+      .select("id, name, email, role, roles, password_hash, is_active")
+      .eq("email", email)
       .eq("is_active", true)
       .single()
 
-    if (error || !user) {
-      return Response.json(
-        {
-          success: false,
-          message: "Invalid email or password.",
-        },
-        { status: 401 }
-      )
-    }
-
-    if (!user.password_hash) {
-      return Response.json(
-        {
-          success: false,
-          message:
-            "Password is not set for this user yet. Ask the owner to set it.",
-        },
-        { status: 401 }
-      )
+    if (error || !user?.password_hash) {
+      return invalidCredentialsResponse()
     }
 
     const passwordMatches = await bcrypt.compare(password, user.password_hash)
 
     if (!passwordMatches) {
-      return Response.json(
-        {
-          success: false,
-          message: "Invalid email or password.",
-        },
-        { status: 401 }
-      )
+      return invalidCredentialsResponse()
     }
 
     const sessionToken = crypto.randomBytes(32).toString("hex")
@@ -73,12 +110,14 @@ export async function POST(request: Request) {
       })
 
     if (sessionError) {
-      return Response.json(
+      console.error("Admin session creation failed:", sessionError)
+
+      return jsonResponse(
         {
           success: false,
-          message: sessionError.message,
+          message: "Unable to sign in right now. Please try again.",
         },
-        { status: 500 }
+        500
       )
     }
 
@@ -90,26 +129,30 @@ export async function POST(request: Request) {
       secure: process.env.NODE_ENV === "production",
       path: "/",
       expires: expiresAt,
+      priority: "high",
     })
 
-    return Response.json({
-      success: true,
-      user: {
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        roles: user.roles,
+    return jsonResponse(
+      {
+        success: true,
+        user: {
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          roles: user.roles,
+        },
       },
-    })
-  } catch (error: any) {
+      200
+    )
+  } catch (error) {
     console.error("Admin login error:", error)
 
-    return Response.json(
+    return jsonResponse(
       {
         success: false,
-        message: error?.message || "Something went wrong during login.",
+        message: "Unable to sign in right now. Please try again.",
       },
-      { status: 500 }
+      500
     )
   }
 }
