@@ -6,6 +6,7 @@ import { AssignTaskModal } from "./assign-task-modal"
 import { TaskActions } from "./task-actions"
 import { EditTaskButton } from "./edit-task-button"
 import { DeleteTaskButton } from "./delete-task-button"
+import CopyTaskCodeButton from "./copy-task-code-button"
 
 export const dynamic = "force-dynamic"
 
@@ -272,7 +273,12 @@ export default async function WorkflowTasksPage({
                 <div className="grid gap-5 xl:grid-cols-[1.35fr_1.2fr_1fr_250px]">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-mono text-xs font-semibold text-muted-foreground">{task.task_code}</p>
+                      <div className="flex items-center gap-1">
+                        <p className="font-mono text-xs font-semibold text-muted-foreground">
+                          {task.task_code}
+                        </p>
+                        <CopyTaskCodeButton taskCode={task.task_code} />
+                      </div>
                       <StatusPill label={status} />
                       {isOverdue && <StatusPill label="Overdue" />}
                     </div>

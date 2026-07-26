@@ -1,0 +1,3831 @@
+
+==================== app/api/admin/brochure/extract/route.ts ====================
+import fs from "fs/promises"
+import os from "os"
+import path from "path"
+import { execFile } from "child_process"
+import { promisify } from "util"
+import sharp from "sharp"
+import OpenAI from "openai"
+import { requireAdminUser } from "@/lib/admin-auth"
+import { supabaseAdmin } from "@/lib/supabase-admin"
+
+export const runtime = "nodejs"
+export const maxDuration = 120
+
+const execFileAsync = promisify(execFile)
+
+type AiExtractedProduct = {
+  name?: string
+  category?: string
+  budget_band?: string
+  occasion?: string
+  recipient_type?: string
+  use_case?: string
+  industry?: string
+  material?: string | null
+  brandable_area?: string | null
+  packaging?: string | null
+  logistics_type?: string | null
+  delivery_window?: string | null
+  moq?: string | null
+  lead_time?: string | null
+  color_options?: string | null
+  tag_1?: string
+  tag_2?: string | null
+  tag_3?: string | null
+  tag_4?: string | null
+  tag_5?: string | null
+  description?: string
+  features?: string[]
+}
+
+type ExtractedProduct = {
+  brand: string
+  name: string
+  category: string
+  budget_band: string
+  occasion: string
+  recipient_type: string
+  use_case: string
+  industry: string
+  material: string | null
+  brandable_area: string | null
+  packaging: string | null
+  logistics_type: string | null
+  delivery_window: string | null
+  moq: string | null
+  lead_time: string | null
+  color_options: string | null
+  tag_1: string
+  tag_2: string | null
+  tag_3: string | null
+  tag_4: string | null
+  tag_5: string | null
+  description: string
+  features: string[]
+  image_url: string | null
+  image_filename: string | null
+  source_brochure: string
+  source_page: string
+  source_position: string
+  is_active: boolean
+  is_featured: boolean
+}
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+})
+
+function slugify(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+}
+
+function cleanJsonText(value: string) {
+  return String(value || "")
+    .replace(/```json/g, "")
+    .replace(/```/g, "")
+    .trim()
+}
+
+function cleanFeatures(features: unknown) {
+  if (!Array.isArray(features)) return []
+
+  return features
+    .map((feature) => String(feature || "").trim())
+    .filter(Boolean)
+    .slice(0, 8)
+}
+
+function normalizeProduct(
+  product: AiExtractedProduct,
+  brand: string,
+  brochureName: string,
+  page: number,
+  position: number,
+  imageUrl: string | null,
+  imageFilename: string | null
+): ExtractedProduct {
+  const features = cleanFeatures(product.features)
+
+  return {
+    brand,
+    name: String(product.name || `Product ${page}-${position}`).trim(),
+    category: String(product.category || "Others").trim(),
+    budget_band: String(product.budget_band || "₹500–₹1000").trim(),
+    occasion: String(product.occasion || "Corporate gifting").trim(),
+    recipient_type: String(product.recipient_type || "Employees").trim(),
+    use_case: String(product.use_case || "Employee gifting").trim(),
+    industry: String(product.industry || "Others").trim(),
+    material: product.material || null,
+    brandable_area: product.brandable_area || null,
+    packaging: product.packaging || null,
+    logistics_type: product.logistics_type || null,
+    delivery_window: product.delivery_window || null,
+    moq: product.moq || null,
+    lead_time: product.lead_time || null,
+    color_options: product.color_options || null,
+    tag_1: String(product.tag_1 || "Corporate gifting").trim(),
+    tag_2: product.tag_2 || "Premium",
+    tag_3: product.tag_3 || null,
+    tag_4: product.tag_4 || null,
+    tag_5: product.tag_5 || null,
+    description: String(
+      product.description ||
+        "Corporate gifting product suitable for employee and client gifting."
+    ).trim(),
+    features,
+    image_url: imageUrl,
+    image_filename: imageFilename,
+    source_brochure: brochureName,
+    source_page: String(page),
+    source_position: String(position),
+    is_active: true,
+    is_featured: false,
+  }
+}
+
+async function convertPdfPageToImage(
+  pdfBuffer: Buffer,
+  page: number,
+  tempDir: string
+) {
+  const pdfPath = path.join(tempDir, "brochure.pdf")
+  await fs.writeFile(pdfPath, pdfBuffer)
+
+  const outputPrefix = path.join(tempDir, `page-${page}`)
+
+  const possiblePaths = [
+    "/opt/homebrew/bin/pdftocairo",
+    "/usr/local/bin/pdftocairo",
+    "pdftocairo",
+  ]
+
+  let lastError: unknown = null
+
+  for (const binaryPath of possiblePaths) {
+    try {
+      await execFileAsync(binaryPath, [
+        "-jpeg",
+        "-f",
+        String(page),
+        "-l",
+        String(page),
+        "-singlefile",
+        "-scale-to",
+        "1600",
+        pdfPath,
+        outputPrefix,
+      ])
+
+      return `${outputPrefix}.jpg`
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  console.error("PDF conversion failed:", lastError)
+
+  throw new Error(
+    "PDF conversion failed. Install Poppler using Homebrew, then restart server."
+  )
+}
+
+function getBestKnownImageFolder(brand: string, brochureName: string) {
+  const key = `${brand} ${brochureName}`.toLowerCase()
+
+  if (key.includes("fuzo")) {
+    return "fuzo-may-2026"
+  }
+
+  return null
+}
+
+async function findBestKnownImageUrl(
+  brand: string,
+  brochureName: string,
+  page: number,
+  position: number
+) {
+  const folder = getBestKnownImageFolder(brand, brochureName)
+
+  if (!folder) return null
+
+  const pagePart = `p${String(page).padStart(3, "0")}`
+  const positionPart = String(position).padStart(2, "0")
+  const expectedPrefix = `${slugify(brochureName)}-${pagePart}-${positionPart}-`
+
+  const { data, error } = await supabaseAdmin.storage
+    .from("product-images")
+    .list(folder, {
+      limit: 1000,
+      offset: 0,
+    })
+
+  if (error) {
+    console.log("Known image lookup error:", error.message)
+    return null
+  }
+
+  const matchedFile = data?.find((file) => file.name.startsWith(expectedPrefix))
+
+  if (!matchedFile) return null
+
+  const storagePath = `${folder}/${matchedFile.name}`
+
+  const { data: publicData } = supabaseAdmin.storage
+    .from("product-images")
+    .getPublicUrl(storagePath)
+
+  return {
+    imageUrl: publicData.publicUrl,
+    imageFilename: matchedFile.name,
+  }
+}
+
+async function createWideCatalogImage(
+  imagePath: string,
+  brand: string,
+  brochureName: string
+) {
+  const metadata = await sharp(imagePath).metadata()
+
+  const imageWidth = metadata.width || 0
+  const imageHeight = metadata.height || 0
+
+  if (!imageWidth || !imageHeight) {
+    return sharp(imagePath)
+      .resize({
+        width: 1200,
+        withoutEnlargement: true,
+      })
+      .jpeg({ quality: 92 })
+      .toBuffer()
+  }
+
+  const key = `${brand} ${brochureName}`.toLowerCase()
+
+  const crop =
+    key.includes("fuzo")
+      ? { x: 6, y: 0, width: 88, height: 47 }
+      : { x: 6, y: 0, width: 88, height: 55 }
+
+  const left = Math.round((crop.x / 100) * imageWidth)
+  const top = Math.round((crop.y / 100) * imageHeight)
+  const width = Math.round((crop.width / 100) * imageWidth)
+  const height = Math.round((crop.height / 100) * imageHeight)
+
+  return sharp(imagePath)
+    .extract({
+      left,
+      top,
+      width: Math.min(width, imageWidth - left),
+      height: Math.min(height, imageHeight - top),
+    })
+    .resize({
+      width: 1200,
+      withoutEnlargement: true,
+    })
+    .jpeg({ quality: 92 })
+    .toBuffer()
+}
+
+async function uploadGeneratedImageToSupabase(
+  imageBuffer: Buffer,
+  brochureName: string,
+  page: number,
+  position: number,
+  productName: string
+) {
+  const uniqueRunId = Date.now()
+
+  const imageFilename = `${slugify(brochureName)}-p${String(page).padStart(
+    3,
+    "0"
+  )}-${String(position).padStart(2, "0")}-${slugify(
+    productName
+  )}-${uniqueRunId}.jpg`
+
+  const storagePath = `brochures/${slugify(brochureName)}/${imageFilename}`
+
+  const { error } = await supabaseAdmin.storage
+    .from("product-images")
+    .upload(storagePath, imageBuffer, {
+      contentType: "image/jpeg",
+      upsert: true,
+      cacheControl: "0",
+    })
+
+  if (error) {
+    throw new Error(error.message)
+  }
+
+  const { data } = supabaseAdmin.storage
+    .from("product-images")
+    .getPublicUrl(storagePath)
+
+  return {
+    imageUrl: `${data.publicUrl}?v=${uniqueRunId}`,
+    imageFilename,
+  }
+}
+
+async function extractProductsFromImage(
+  imagePath: string,
+  brand: string,
+  brochureName: string,
+  page: number
+) {
+  const imageBuffer = await fs.readFile(imagePath)
+  const base64Image = imageBuffer.toString("base64")
+
+  const prompt = `
+You are extracting product data from a corporate gifting brochure page image.
+
+Brand: ${brand}
+Brochure: ${brochureName}
+Page number: ${page}
+
+Extract ONLY products visible on this page.
+
+Return ONLY valid JSON array. No markdown. No explanation.
+
+If there is one product on the page, return one object.
+If there are multiple products on the page, return multiple objects in top-to-bottom / left-to-right order.
+
+Use this exact JSON shape:
+[
+  {
+    "name": "",
+    "category": "",
+    "budget_band": "",
+    "occasion": "",
+    "recipient_type": "",
+    "use_case": "",
+    "industry": "",
+    "material": null,
+    "brandable_area": null,
+    "packaging": null,
+    "logistics_type": null,
+    "delivery_window": null,
+    "moq": null,
+    "lead_time": null,
+    "color_options": null,
+    "tag_1": "",
+    "tag_2": "",
+    "tag_3": null,
+    "tag_4": null,
+    "tag_5": null,
+    "description": "",
+    "features": []
+  }
+]
+
+Rules:
+- Use the visible product title from the page.
+- Do not return actual prices.
+- Read feature icons, specification text, battery/capacity, material, handle, closure, charging, size, speed, compatibility, and usage notes if visible.
+- Description must be 18 to 35 words.
+- Description must include 3 to 5 useful product features when visible.
+- Do not use only generic wording like "suitable for corporate gifting".
+- features must contain 3 to 8 short bullet points based on visible features/specifications.
+- category must be one of: Drinkware, Tech Accessories, Desk Accessories, Bags, Home & Living, Wellness, Stationery, Lifestyle, Travel Accessories, Others.
+- budget_band must be one of: Under ₹250, ₹250–₹500, ₹500–₹1000, ₹1000+.
+- occasion must be one of: Employee onboarding, Diwali gifting, Client appreciation, Event giveaway, Conference / Event, Corporate gifting.
+- recipient_type must be one of: Employees, Clients, Leadership, Sales team, Ground staff, Others.
+- use_case must be one of: Employee gifting, Client gifting, Bulk gifting, Premium gifting, Event gifting.
+- industry must be one of: IT, BFSI, Pharma, Manufacturing, Real Estate, Education, Others.
+`
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: prompt,
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: `data:image/jpeg;base64,${base64Image}`,
+            },
+          },
+        ],
+      },
+    ],
+    temperature: 0.1,
+  })
+
+  const text = completion.choices[0]?.message?.content || "[]"
+
+  return JSON.parse(cleanJsonText(text)) as AiExtractedProduct[]
+}
+
+export async function POST(request: Request) {
+  await requireAdminUser(["Owner", "Admin"])
+
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "brochure-import-"))
+
+  try {
+    if (!process.env.OPENAI_API_KEY) {
+      return Response.json(
+        {
+          success: false,
+          message: "Brochure extraction is not configured.",
+        },
+        { status: 500 }
+      )
+    }
+
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return Response.json(
+        {
+          success: false,
+          message: "Brochure extraction is not configured.",
+        },
+        { status: 500 }
+      )
+    }
+
+    const formData = await request.formData()
+
+    const file = formData.get("file") as File | null
+    const brand = String(formData.get("brand") || "").trim()
+    const brochureName = String(formData.get("brochureName") || "").trim()
+    const startPage = Number(formData.get("startPage") || 1)
+    const endPage = Number(formData.get("endPage") || startPage)
+
+    if (!file) {
+      return Response.json(
+        { success: false, message: "PDF file is required." },
+        { status: 400 }
+      )
+    }
+
+    if (!brand || !brochureName) {
+      return Response.json(
+        { success: false, message: "Brand and brochure name are required." },
+        { status: 400 }
+      )
+    }
+
+    if (endPage < startPage) {
+      return Response.json(
+        { success: false, message: "End page cannot be before start page." },
+        { status: 400 }
+      )
+    }
+
+    const pageCount = endPage - startPage + 1
+
+    if (pageCount > 3) {
+      return Response.json(
+        {
+          success: false,
+          message:
+            "For testing, please extract maximum 3 pages only. Try page 2 to 4.",
+        },
+        { status: 400 }
+      )
+    }
+
+    const pdfBuffer = Buffer.from(await file.arrayBuffer())
+    const products: ExtractedProduct[] = []
+
+    for (let page = startPage; page <= endPage; page++) {
+      const imagePath = await convertPdfPageToImage(pdfBuffer, page, tempDir)
+
+      const extractedProducts = await extractProductsFromImage(
+        imagePath,
+        brand,
+        brochureName,
+        page
+      )
+
+      const finalExtractedProducts =
+        extractedProducts.length > 0
+          ? extractedProducts
+          : [
+              {
+                name: `Product ${page}-1`,
+                category: "Others",
+                budget_band: "₹500–₹1000",
+                occasion: "Corporate gifting",
+                recipient_type: "Employees",
+                use_case: "Employee gifting",
+                industry: "Others",
+                tag_1: "Corporate gifting",
+                tag_2: "Premium",
+                description:
+                  "Corporate gifting product suitable for employee and client gifting.",
+                features: ["Corporate gifting product"],
+              },
+            ]
+
+      for (let index = 0; index < finalExtractedProducts.length; index++) {
+        const position = index + 1
+        const extractedProduct = finalExtractedProducts[index]
+
+        const knownImage = await findBestKnownImageUrl(
+          brand,
+          brochureName,
+          page,
+          position
+        )
+
+        let imageData = knownImage
+
+        if (!imageData) {
+          const generatedImageBuffer = await createWideCatalogImage(
+            imagePath,
+            brand,
+            brochureName
+          )
+
+          imageData = await uploadGeneratedImageToSupabase(
+            generatedImageBuffer,
+            brochureName,
+            page,
+            position,
+            extractedProduct.name || `Product ${page}-${position}`
+          )
+        }
+
+        products.push(
+          normalizeProduct(
+            extractedProduct,
+            brand,
+            brochureName,
+            page,
+            position,
+            imageData.imageUrl,
+            imageData.imageFilename
+          )
+        )
+      }
+    }
+
+    return Response.json({
+      success: true,
+      products,
+    })
+  } catch (error: any) {
+    console.error("Brochure extract error:", error)
+
+    if (error?.code === "insufficient_quota" || error?.status === 429) {
+      return Response.json(
+        {
+          success: false,
+          message:
+            "OpenAI API quota/billing issue. Add billing or credits in OpenAI Platform, then try again.",
+        },
+        { status: 429 }
+      )
+    }
+
+    return Response.json(
+      {
+        success: false,
+        message:
+          error?.message ||
+          "Something went wrong while extracting brochure. Check terminal logs.",
+      },
+      { status: 500 }
+    )
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true })
+  }
+}
+==================== app/api/admin/brochure/import/route.ts ====================
+import { requireAdminUser } from "@/lib/admin-auth"
+import { supabaseAdmin } from "@/lib/supabase-admin"
+
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
+const MAX_REQUEST_BYTES = 2_000_000
+const MAX_PRODUCTS_PER_IMPORT = 200
+
+function jsonResponse(
+  body: Record<string, unknown>,
+  status = 200
+) {
+  return Response.json(body, {
+    status,
+    headers: {
+      "Cache-Control": "no-store, max-age=0",
+    },
+  })
+}
+
+function slugify(value: unknown) {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+}
+
+function createBrochureSku(product: any) {
+  return slugify(
+    [
+      product.brand,
+      product.source_brochure,
+      `p${String(product.source_page || "").padStart(3, "0")}`,
+      String(product.source_position || "").padStart(2, "0"),
+    ]
+      .filter(Boolean)
+      .join("-")
+  )
+}
+
+function cleanText(value: unknown) {
+  const text = String(value || "").trim()
+  return text.length > 0 ? text : null
+}
+
+function cleanFeatures(value: unknown) {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .map((feature) => String(feature || "").trim())
+    .filter(Boolean)
+    .slice(0, 8)
+}
+
+export async function POST(request: Request) {
+  await requireAdminUser(["Owner", "Admin"])
+
+  try {
+    const contentLength = Number(request.headers.get("content-length") || 0)
+
+    if (contentLength > MAX_REQUEST_BYTES) {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Import request is too large.",
+        },
+        413
+      )
+    }
+
+    let requestBody: unknown
+
+    try {
+      requestBody = await request.json()
+    } catch {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Invalid import request.",
+        },
+        400
+      )
+    }
+
+    if (!requestBody || typeof requestBody !== "object") {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Invalid import request.",
+        },
+        400
+      )
+    }
+
+    const { products } = requestBody as { products?: unknown }
+
+    if (!Array.isArray(products) || products.length === 0) {
+      return jsonResponse(
+        {
+          success: false,
+          message: "No products provided.",
+        },
+        400
+      )
+    }
+
+    if (products.length > MAX_PRODUCTS_PER_IMPORT) {
+      return jsonResponse(
+        {
+          success: false,
+          message: `Import a maximum of ${MAX_PRODUCTS_PER_IMPORT} products at a time.`,
+        },
+        400
+      )
+    }
+
+    const rows = products.map((product: any) => {
+      const sku = createBrochureSku(product)
+
+      return {
+        sku,
+        brand: cleanText(product.brand),
+        name: String(product.name || "").trim(),
+        category: String(product.category || "Others").trim(),
+        budget_band: String(product.budget_band || "₹500–₹1000").trim(),
+        occasion: cleanText(product.occasion),
+        recipient_type: cleanText(product.recipient_type),
+        use_case: cleanText(product.use_case),
+        industry: cleanText(product.industry),
+        material: cleanText(product.material),
+        brandable_area: cleanText(product.brandable_area),
+        packaging: cleanText(product.packaging),
+        logistics_type: cleanText(product.logistics_type),
+        delivery_window: cleanText(product.delivery_window),
+        moq: cleanText(product.moq),
+        lead_time: cleanText(product.lead_time),
+        color_options: cleanText(product.color_options),
+        tags: [
+          product.tag_1,
+          product.tag_2,
+          product.tag_3,
+          product.tag_4,
+          product.tag_5,
+        ]
+          .map((tag) => String(tag || "").trim())
+          .filter(Boolean)
+          .join(", "),
+        description: cleanText(product.description),
+        image_url: cleanText(product.image_url),
+        source_brochure: cleanText(product.source_brochure),
+        source_page: cleanText(product.source_page),
+        source_position: cleanText(product.source_position),
+        image_filename: cleanText(product.image_filename),
+        is_active: product.is_active ?? true,
+        is_featured: product.is_featured ?? false,
+      }
+    })
+
+    if (rows.some((row) => !row.sku || !row.name)) {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Every product must have a valid name and brochure reference.",
+        },
+        400
+      )
+    }
+
+    const { error } = await supabaseAdmin
+      .from("products")
+      .upsert(rows, {
+        onConflict: "sku",
+      })
+
+    if (error) {
+      console.error("Brochure product upsert failed:", error)
+
+      return jsonResponse(
+        {
+          success: false,
+          message: "Unable to import products right now.",
+        },
+        500
+      )
+    }
+
+    for (let index = 0; index < products.length; index++) {
+      const product = products[index] as any
+      const sku = createBrochureSku(product)
+      const imageUrl = cleanText(product.image_url)
+      const imageFilename = cleanText(product.image_filename)
+      const features = cleanFeatures(product.features)
+
+      if (imageUrl) {
+        const { error: deleteImageError } = await supabaseAdmin
+          .from("product_images")
+          .delete()
+          .eq("product_sku", sku)
+          .eq("sort_order", 1)
+
+        if (deleteImageError) {
+          console.error("Product image cleanup failed:", deleteImageError)
+        }
+
+        const { error: imageInsertError } = await supabaseAdmin
+          .from("product_images")
+          .insert({
+            product_sku: sku,
+            image_url: imageUrl,
+            image_filename: imageFilename,
+            image_type: "main",
+            sort_order: 1,
+          })
+
+        if (imageInsertError) {
+          console.error("Product image insert failed:", imageInsertError)
+        }
+      }
+
+      const { error: deleteFeaturesError } = await supabaseAdmin
+        .from("product_features")
+        .delete()
+        .eq("product_sku", sku)
+
+      if (deleteFeaturesError) {
+        console.error("Product feature cleanup failed:", deleteFeaturesError)
+      }
+
+      if (features.length > 0) {
+        const { error: featureInsertError } = await supabaseAdmin
+          .from("product_features")
+          .insert(
+            features.map((feature, featureIndex) => ({
+              product_sku: sku,
+              feature_text: feature,
+              sort_order: featureIndex + 1,
+            }))
+          )
+
+        if (featureInsertError) {
+          console.error("Product feature insert failed:", featureInsertError)
+        }
+      }
+    }
+
+    return jsonResponse({
+      success: true,
+      count: rows.length,
+    })
+  } catch (error) {
+    console.error("Brochure import error:", error)
+
+    return jsonResponse(
+      {
+        success: false,
+        message: "Something went wrong while importing products.",
+      },
+      500
+    )
+  }
+}
+==================== app/api/admin/enquiries/[id]/quotation-ppt/route.ts ====================
+import { NextResponse } from "next/server"
+import pptxgen from "pptxgenjs"
+import { requireAdminUser } from "@/lib/admin-auth"
+import { supabaseAdmin } from "@/lib/supabase-admin"
+
+function cleanText(value: string | number | null | undefined) {
+  return String(value || "")
+    .replace(/[\n\r\t]/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+}
+
+function formatCurrency(value: number | string | null | undefined) {
+  const numberValue = Number(value || 0)
+
+  if (!numberValue) {
+    return "As discussed"
+  }
+
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(numberValue)
+}
+
+function addFooter(slide: any, pptx: any) {
+  slide.addShape(pptx.ShapeType.line, {
+    x: 0.6,
+    y: 6.9,
+    w: 12.1,
+    h: 0,
+    line: {
+      color: "DDDDDD",
+      width: 1,
+    },
+  })
+
+  slide.addText("White C Corporate Gifting", {
+    x: 0.6,
+    y: 7.05,
+    w: 5,
+    h: 0.25,
+    fontSize: 8,
+    color: "666666",
+  })
+
+  slide.addText("Confidential Proposal", {
+    x: 9.7,
+    y: 7.05,
+    w: 3,
+    h: 0.25,
+    fontSize: 8,
+    color: "666666",
+    align: "right",
+  })
+}
+
+function addTitle(slide: any, title: string, subtitle?: string) {
+  slide.addText(title, {
+    x: 0.7,
+    y: 0.55,
+    w: 11.8,
+    h: 0.5,
+    fontSize: 24,
+    bold: true,
+    color: "111827",
+  })
+
+  if (subtitle) {
+    slide.addText(subtitle, {
+      x: 0.72,
+      y: 1.15,
+      w: 11.3,
+      h: 0.35,
+      fontSize: 11,
+      color: "6B7280",
+    })
+  }
+}
+
+function addInfoBox({
+  slide,
+  label,
+  value,
+  x,
+  y,
+  w,
+}: {
+  slide: any
+  label: string
+  value: string
+  x: number
+  y: number
+  w: number
+}) {
+  slide.addShape("roundRect", {
+    x,
+    y,
+    w,
+    h: 0.9,
+    rectRadius: 0.08,
+    fill: {
+      color: "F8FAFC",
+    },
+    line: {
+      color: "E5E7EB",
+      width: 1,
+    },
+  })
+
+  slide.addText(label, {
+    x: x + 0.18,
+    y: y + 0.14,
+    w: w - 0.36,
+    h: 0.22,
+    fontSize: 8,
+    bold: true,
+    color: "6B7280",
+  })
+
+  slide.addText(value || "—", {
+    x: x + 0.18,
+    y: y + 0.45,
+    w: w - 0.36,
+    h: 0.3,
+    fontSize: 12,
+    bold: true,
+    color: "111827",
+    fit: "shrink",
+  })
+}
+
+function addBullet(slide: any, text: string, y: number) {
+  slide.addShape("ellipse", {
+    x: 0.85,
+    y: y + 0.1,
+    w: 0.08,
+    h: 0.08,
+    fill: {
+      color: "111827",
+    },
+    line: {
+      color: "111827",
+    },
+  })
+
+  slide.addText(text, {
+    x: 1.08,
+    y,
+    w: 11,
+    h: 0.35,
+    fontSize: 13,
+    color: "374151",
+    fit: "shrink",
+  })
+}
+
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    await requireAdminUser(["Owner", "Admin", "Sales", "Operations"])
+
+    const { id } = await params
+    const enquiryId = cleanText(id)
+
+    if (!enquiryId) {
+      throw new Error("Enquiry ID is required.")
+    }
+
+    const { data: enquiry, error } = await supabaseAdmin
+      .from("workflow_enquiries")
+      .select("*")
+      .eq("id", enquiryId)
+      .single()
+
+    if (error || !enquiry) {
+      throw new Error(error?.message || "Enquiry not found.")
+    }
+
+    const clientName = cleanText(enquiry.client_name || "Client")
+    const enquiryCode = cleanText(enquiry.enquiry_code || "ENQUIRY")
+    const productNames = cleanText(
+      enquiry.product_names || "Corporate gifting requirement"
+    )
+    const tentativeQuantity = cleanText(
+      enquiry.tentative_quantity || "As discussed"
+    )
+    const approxCost = formatCurrency(enquiry.approx_cost)
+    const clientEmail = cleanText(enquiry.client_email || "Not provided")
+    const clientPhone = cleanText(enquiry.client_phone || "Not provided")
+    const remarks = cleanText(enquiry.remarks || "No remarks added")
+    const nextFollowUpDate = cleanText(
+      enquiry.next_follow_up_date || "As discussed"
+    )
+
+    const pptx = new pptxgen()
+
+    pptx.defineLayout({
+      name: "CUSTOM_WIDE",
+      width: 13.333,
+      height: 7.5,
+    })
+
+    pptx.layout = "CUSTOM_WIDE"
+    pptx.author = "White C"
+    pptx.company = "White C"
+    pptx.subject = `Quotation proposal for ${clientName}`
+    pptx.title = `White C Proposal - ${enquiryCode}`
+
+    pptx.theme = {
+      headFontFace: "Arial",
+      bodyFontFace: "Arial",
+    }
+
+        const cover = pptx.addSlide()
+    cover.background = {
+      color: "FFFFFF",
+    }
+
+    cover.addShape("rect", {
+      x: 0,
+      y: 0,
+      w: 13.333,
+      h: 7.5,
+      fill: {
+        color: "F8FAFC",
+      },
+      line: {
+        color: "F8FAFC",
+      },
+    })
+
+    cover.addText("WHITE C", {
+      x: 0.75,
+      y: 0.6,
+      w: 2.8,
+      h: 0.45,
+      fontSize: 18,
+      bold: true,
+      color: "111827",
+    })
+
+    cover.addText("Corporate Gifting Proposal", {
+      x: 0.75,
+      y: 2.05,
+      w: 7.6,
+      h: 0.65,
+      fontSize: 30,
+      bold: true,
+      color: "111827",
+    })
+
+    cover.addText(`Prepared for ${clientName}`, {
+      x: 0.78,
+      y: 2.85,
+      w: 7.6,
+      h: 0.42,
+      fontSize: 16,
+      color: "374151",
+    })
+
+    cover.addText(`Reference: ${enquiryCode}`, {
+      x: 0.78,
+      y: 3.38,
+      w: 5.2,
+      h: 0.32,
+      fontSize: 12,
+      color: "6B7280",
+    })
+
+    cover.addShape("roundRect", {
+      x: 8.3,
+      y: 1.4,
+      w: 3.95,
+      h: 4.35,
+      rectRadius: 0.12,
+      fill: {
+        color: "FFFFFF",
+      },
+      line: {
+        color: "E5E7EB",
+        width: 1,
+      },
+    })
+
+    cover.addText("Requirement", {
+      x: 8.65,
+      y: 1.85,
+      w: 3.2,
+      h: 0.3,
+      fontSize: 10,
+      bold: true,
+      color: "6B7280",
+    })
+
+    cover.addText(productNames, {
+      x: 8.65,
+      y: 2.25,
+      w: 3.2,
+      h: 1.05,
+      fontSize: 17,
+      bold: true,
+      color: "111827",
+      fit: "shrink",
+    })
+
+    cover.addText("Approx Value", {
+      x: 8.65,
+      y: 3.55,
+      w: 3.2,
+      h: 0.3,
+      fontSize: 10,
+      bold: true,
+      color: "6B7280",
+    })
+
+    cover.addText(approxCost, {
+      x: 8.65,
+      y: 3.95,
+      w: 3.2,
+      h: 0.5,
+      fontSize: 20,
+      bold: true,
+      color: "111827",
+      fit: "shrink",
+    })
+
+    cover.addText("Quantity", {
+      x: 8.65,
+      y: 4.78,
+      w: 3.2,
+      h: 0.3,
+      fontSize: 10,
+      bold: true,
+      color: "6B7280",
+    })
+
+    cover.addText(tentativeQuantity, {
+      x: 8.65,
+      y: 5.15,
+      w: 3.2,
+      h: 0.35,
+      fontSize: 15,
+      bold: true,
+      color: "111827",
+    })
+
+    addFooter(cover, pptx)
+
+    const summary = pptx.addSlide()
+    summary.background = {
+      color: "FFFFFF",
+    }
+
+    addTitle(
+      summary,
+      "Client Requirement Summary",
+      "A quick view of the enquiry and commercial requirement."
+    )
+
+    addInfoBox({
+      slide: summary,
+      label: "Client",
+      value: clientName,
+      x: 0.7,
+      y: 1.8,
+      w: 3.6,
+    })
+
+    addInfoBox({
+      slide: summary,
+      label: "Reference",
+      value: enquiryCode,
+      x: 4.65,
+      y: 1.8,
+      w: 3.6,
+    })
+
+    addInfoBox({
+      slide: summary,
+      label: "Quantity",
+      value: tentativeQuantity,
+      x: 8.6,
+      y: 1.8,
+      w: 3.6,
+    })
+
+    addInfoBox({
+      slide: summary,
+      label: "Approx Value",
+      value: approxCost,
+      x: 0.7,
+      y: 3.05,
+      w: 3.6,
+    })
+
+    addInfoBox({
+      slide: summary,
+      label: "Phone",
+      value: clientPhone,
+      x: 4.65,
+      y: 3.05,
+      w: 3.6,
+    })
+
+    addInfoBox({
+      slide: summary,
+      label: "Email",
+      value: clientEmail,
+      x: 8.6,
+      y: 3.05,
+      w: 3.6,
+    })
+
+    summary.addText("Requirement", {
+      x: 0.75,
+      y: 4.45,
+      w: 2.2,
+      h: 0.3,
+      fontSize: 10,
+      bold: true,
+      color: "6B7280",
+    })
+
+    summary.addShape("roundRect", {
+      x: 0.7,
+      y: 4.85,
+      w: 11.9,
+      h: 1.25,
+      rectRadius: 0.08,
+      fill: {
+        color: "F8FAFC",
+      },
+      line: {
+        color: "E5E7EB",
+      },
+    })
+
+    summary.addText(productNames, {
+      x: 0.95,
+      y: 5.15,
+      w: 11.4,
+      h: 0.7,
+      fontSize: 17,
+      bold: true,
+      color: "111827",
+      fit: "shrink",
+    })
+
+    addFooter(summary, pptx)
+
+    const recommendations = pptx.addSlide()
+    recommendations.background = {
+      color: "FFFFFF",
+    }
+
+    addTitle(
+      recommendations,
+      "Recommended Proposal Direction",
+      "Suggested structure for the gifting proposal based on the enquiry."
+    )
+
+    addBullet(
+      recommendations,
+      `Recommended gifting requirement: ${productNames}`,
+      1.8
+    )
+
+    addBullet(
+      recommendations,
+      `Estimated quantity to plan for: ${tentativeQuantity}`,
+      2.35
+    )
+
+    addBullet(
+      recommendations,
+      `Estimated commercial range: ${approxCost}`,
+      2.9
+    )
+
+    addBullet(
+      recommendations,
+      "Branding and logo placement options can be customized as per final product selection.",
+      3.45
+    )
+
+    addBullet(
+      recommendations,
+      "Final pricing may vary based on MOQ, customization, packaging, and delivery timeline.",
+      4
+    )
+
+    addBullet(
+      recommendations,
+      `Next follow-up date: ${nextFollowUpDate}`,
+      4.55
+    )
+
+    recommendations.addShape("roundRect", {
+      x: 0.75,
+      y: 5.35,
+      w: 11.8,
+      h: 0.9,
+      rectRadius: 0.08,
+      fill: {
+        color: "F8FAFC",
+      },
+      line: {
+        color: "E5E7EB",
+      },
+    })
+
+    recommendations.addText(`Internal note: ${remarks}`, {
+      x: 1,
+      y: 5.62,
+      w: 11.25,
+      h: 0.35,
+      fontSize: 11,
+      color: "374151",
+      fit: "shrink",
+    })
+
+    addFooter(recommendations, pptx)
+
+        const quotation = pptx.addSlide()
+    quotation.background = {
+      color: "FFFFFF",
+    }
+
+    addTitle(
+      quotation,
+      "Quotation Summary",
+      "Commercial summary to support client discussion."
+    )
+
+    quotation.addShape("roundRect", {
+      x: 0.75,
+      y: 1.75,
+      w: 11.85,
+      h: 3.25,
+      rectRadius: 0.08,
+      fill: {
+        color: "FFFFFF",
+      },
+      line: {
+        color: "E5E7EB",
+        width: 1,
+      },
+    })
+
+    quotation.addText("Requirement", {
+      x: 1.05,
+      y: 2.1,
+      w: 2.5,
+      h: 0.3,
+      fontSize: 10,
+      bold: true,
+      color: "6B7280",
+    })
+
+    quotation.addText(productNames, {
+      x: 4.05,
+      y: 2.1,
+      w: 7.95,
+      h: 0.35,
+      fontSize: 13,
+      bold: true,
+      color: "111827",
+      fit: "shrink",
+    })
+
+    quotation.addShape(pptx.ShapeType.line, {
+      x: 1.05,
+      y: 2.65,
+      w: 10.95,
+      h: 0,
+      line: {
+        color: "E5E7EB",
+      },
+    })
+
+    quotation.addText("Quantity", {
+      x: 1.05,
+      y: 2.95,
+      w: 2.5,
+      h: 0.3,
+      fontSize: 10,
+      bold: true,
+      color: "6B7280",
+    })
+
+    quotation.addText(tentativeQuantity, {
+      x: 4.05,
+      y: 2.95,
+      w: 7.95,
+      h: 0.35,
+      fontSize: 13,
+      bold: true,
+      color: "111827",
+    })
+
+    quotation.addShape(pptx.ShapeType.line, {
+      x: 1.05,
+      y: 3.5,
+      w: 10.95,
+      h: 0,
+      line: {
+        color: "E5E7EB",
+      },
+    })
+
+    quotation.addText("Estimated Value", {
+      x: 1.05,
+      y: 3.8,
+      w: 2.5,
+      h: 0.3,
+      fontSize: 10,
+      bold: true,
+      color: "6B7280",
+    })
+
+    quotation.addText(approxCost, {
+      x: 4.05,
+      y: 3.78,
+      w: 7.95,
+      h: 0.38,
+      fontSize: 15,
+      bold: true,
+      color: "111827",
+    })
+
+    quotation.addText(
+      "Note: Final quote will be confirmed after product selection, artwork confirmation, packaging requirement, MOQ confirmation, and delivery location.",
+      {
+        x: 0.85,
+        y: 5.45,
+        w: 11.6,
+        h: 0.5,
+        fontSize: 11,
+        color: "6B7280",
+        fit: "shrink",
+      }
+    )
+
+    addFooter(quotation, pptx)
+
+    const nextSteps = pptx.addSlide()
+    nextSteps.background = {
+      color: "FFFFFF",
+    }
+
+    addTitle(
+      nextSteps,
+      "Next Steps",
+      "Recommended process to move from enquiry to confirmed order."
+    )
+
+    addBullet(nextSteps, "Finalize preferred gifting product options.", 1.75)
+
+    addBullet(
+      nextSteps,
+      "Share branding/logo artwork for mockup creation.",
+      2.3
+    )
+
+    addBullet(
+      nextSteps,
+      "Confirm quantity, packaging, and delivery timeline.",
+      2.85
+    )
+
+    addBullet(
+      nextSteps,
+      "Confirm quotation and commercial approval.",
+      3.4
+    )
+
+    addBullet(
+      nextSteps,
+      "Proceed with PO, production, and dispatch planning.",
+      3.95
+    )
+
+    nextSteps.addShape("roundRect", {
+      x: 0.75,
+      y: 5,
+      w: 11.85,
+      h: 1.15,
+      rectRadius: 0.08,
+      fill: {
+        color: "111827",
+      },
+      line: {
+        color: "111827",
+      },
+    })
+
+    nextSteps.addText("Thank you", {
+      x: 1.05,
+      y: 5.25,
+      w: 4,
+      h: 0.4,
+      fontSize: 22,
+      bold: true,
+      color: "FFFFFF",
+    })
+
+    nextSteps.addText("White C Corporate Gifting", {
+      x: 7.05,
+      y: 5.35,
+      w: 5.1,
+      h: 0.3,
+      fontSize: 13,
+      color: "FFFFFF",
+      align: "right",
+    })
+
+    addFooter(nextSteps, pptx)
+
+    const pptBuffer = await pptx.write({
+      outputType: "nodebuffer",
+    })
+
+    const fileName = `White-C-Proposal-${enquiryCode}.pptx`
+
+    return new NextResponse(pptBuffer as BodyInit, {
+      status: 200,
+      headers: {
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "Content-Disposition": `attachment; filename="${fileName}"`,
+        "Cache-Control": "no-store",
+      },
+    })
+  } catch (error: any) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: error?.message || "Failed to generate quotation PPT.",
+      },
+      {
+        status: 400,
+      }
+    )
+  }
+}
+==================== app/api/admin/login/route.ts ====================
+import { cookies } from "next/headers"
+import crypto from "crypto"
+import bcrypt from "bcryptjs"
+import { supabaseAdmin } from "@/lib/supabase-admin"
+import { ADMIN_SESSION_COOKIE } from "@/lib/admin-auth"
+
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
+const noStoreHeaders = {
+  "Cache-Control": "no-store, max-age=0",
+}
+
+function jsonResponse(
+  body: Record<string, unknown>,
+  status: number
+) {
+  return Response.json(body, {
+    status,
+    headers: noStoreHeaders,
+  })
+}
+
+function invalidCredentialsResponse() {
+  return jsonResponse(
+    {
+      success: false,
+      message: "Invalid email or password.",
+    },
+    401
+  )
+}
+
+export async function POST(request: Request) {
+  try {
+    let requestBody: unknown
+
+    try {
+      requestBody = await request.json()
+    } catch {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Invalid login request.",
+        },
+        400
+      )
+    }
+
+    if (!requestBody || typeof requestBody !== "object") {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Invalid login request.",
+        },
+        400
+      )
+    }
+
+    const { email: rawEmail, password: rawPassword } = requestBody as {
+      email?: unknown
+      password?: unknown
+    }
+
+    const email =
+      typeof rawEmail === "string" ? rawEmail.toLowerCase().trim() : ""
+    const password = typeof rawPassword === "string" ? rawPassword : ""
+
+    if (!email || !password) {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Email and password are required.",
+        },
+        400
+      )
+    }
+
+    if (email.length > 254 || password.length > 200) {
+      return invalidCredentialsResponse()
+    }
+
+    const { data: user, error } = await supabaseAdmin
+      .from("admin_users")
+      .select("id, name, email, role, roles, password_hash, is_active")
+      .eq("email", email)
+      .eq("is_active", true)
+      .single()
+
+    if (error || !user?.password_hash) {
+      return invalidCredentialsResponse()
+    }
+
+    const passwordMatches = await bcrypt.compare(password, user.password_hash)
+
+    if (!passwordMatches) {
+      return invalidCredentialsResponse()
+    }
+
+    const sessionToken = crypto.randomBytes(32).toString("hex")
+    const expiresAt = new Date()
+    expiresAt.setDate(expiresAt.getDate() + 7)
+
+    const { error: sessionError } = await supabaseAdmin
+      .from("admin_sessions")
+      .insert({
+        user_id: user.id,
+        session_token: sessionToken,
+        expires_at: expiresAt.toISOString(),
+      })
+
+    if (sessionError) {
+      console.error("Admin session creation failed:", sessionError)
+
+      return jsonResponse(
+        {
+          success: false,
+          message: "Unable to sign in right now. Please try again.",
+        },
+        500
+      )
+    }
+
+    const cookieStore = await cookies()
+
+    cookieStore.set(ADMIN_SESSION_COOKIE, sessionToken, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      expires: expiresAt,
+      priority: "high",
+    })
+
+    return jsonResponse(
+      {
+        success: true,
+        user: {
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          roles: user.roles,
+        },
+      },
+      200
+    )
+  } catch (error) {
+    console.error("Admin login error:", error)
+
+    return jsonResponse(
+      {
+        success: false,
+        message: "Unable to sign in right now. Please try again.",
+      },
+      500
+    )
+  }
+}
+==================== app/api/admin/logout/route.ts ====================
+import { cookies } from "next/headers"
+import { NextResponse } from "next/server"
+import { supabaseAdmin } from "@/lib/supabase-admin"
+import { ADMIN_SESSION_COOKIE } from "@/lib/admin-auth"
+
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
+const legacySessionCookieNames = [
+  "admin_session",
+  "admin_session_token",
+  "whitec_admin_session_token",
+]
+
+const sessionCookieNames = [
+  ADMIN_SESSION_COOKIE,
+  ...legacySessionCookieNames,
+]
+
+export async function POST(request: Request) {
+  const cookieStore = await cookies()
+  const sessionTokens = sessionCookieNames
+    .map((cookieName) => cookieStore.get(cookieName)?.value)
+    .filter((token): token is string => Boolean(token))
+
+  if (sessionTokens.length > 0) {
+    const { error } = await supabaseAdmin
+      .from("admin_sessions")
+      .delete()
+      .in("session_token", sessionTokens)
+
+    if (error) {
+      console.error("Admin session deletion failed:", error)
+    }
+  }
+
+  const response = NextResponse.redirect(new URL("/admin/login", request.url), {
+    status: 303,
+  })
+
+  response.headers.set("Cache-Control", "no-store, max-age=0")
+
+  for (const cookieName of sessionCookieNames) {
+    response.cookies.set(cookieName, "", {
+      path: "/",
+      maxAge: 0,
+      expires: new Date(0),
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      priority: "high",
+    })
+  }
+
+  return response
+}
+==================== app/api/admin/set-password/route.ts ====================
+import bcrypt from "bcryptjs"
+import { requireAdminUser } from "@/lib/admin-auth"
+import { supabaseAdmin } from "@/lib/supabase-admin"
+
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
+const noStoreHeaders = {
+  "Cache-Control": "no-store, max-age=0",
+}
+
+function jsonResponse(
+  body: Record<string, unknown>,
+  status: number
+) {
+  return Response.json(body, {
+    status,
+    headers: noStoreHeaders,
+  })
+}
+
+export async function POST(request: Request) {
+  await requireAdminUser(["Owner"])
+
+  try {
+    let requestBody: unknown
+
+    try {
+      requestBody = await request.json()
+    } catch {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Invalid password update request.",
+        },
+        400
+      )
+    }
+
+    if (!requestBody || typeof requestBody !== "object") {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Invalid password update request.",
+        },
+        400
+      )
+    }
+
+    const { email: rawEmail, password: rawPassword } = requestBody as {
+      email?: unknown
+      password?: unknown
+    }
+
+    const email =
+      typeof rawEmail === "string" ? rawEmail.toLowerCase().trim() : ""
+    const password = typeof rawPassword === "string" ? rawPassword : ""
+
+    if (!email || !password) {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Email and password are required.",
+        },
+        400
+      )
+    }
+
+    if (email.length > 254) {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Invalid email address.",
+        },
+        400
+      )
+    }
+
+    if (password.length < 12) {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Password must be at least 12 characters.",
+        },
+        400
+      )
+    }
+
+    if (password.length > 200) {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Password is too long.",
+        },
+        400
+      )
+    }
+
+    const { data: targetUser, error: userError } = await supabaseAdmin
+      .from("admin_users")
+      .select("id")
+      .eq("email", email)
+      .single()
+
+    if (userError || !targetUser) {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Unable to update password for this account.",
+        },
+        404
+      )
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12)
+
+    const { error: updateError } = await supabaseAdmin
+      .from("admin_users")
+      .update({
+        password_hash: passwordHash,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", targetUser.id)
+
+    if (updateError) {
+      console.error("Password update failed:", updateError)
+
+      return jsonResponse(
+        {
+          success: false,
+          message: "Unable to update password right now.",
+        },
+        500
+      )
+    }
+
+    const { error: sessionDeleteError } = await supabaseAdmin
+      .from("admin_sessions")
+      .delete()
+      .eq("user_id", targetUser.id)
+
+    if (sessionDeleteError) {
+      console.error(
+        "Password updated, but session invalidation failed:",
+        sessionDeleteError
+      )
+    }
+
+    return jsonResponse(
+      {
+        success: true,
+        message: "Password updated. Existing sessions were signed out.",
+      },
+      200
+    )
+  } catch (error) {
+    console.error("Set password error:", error)
+
+    return jsonResponse(
+      {
+        success: false,
+        message: "Unable to update password right now.",
+      },
+      500
+    )
+  }
+}
+==================== app/api/inquiry/route.ts ====================
+import { Resend } from "resend"
+
+export const runtime = "nodejs"
+
+const resend = new Resend(process.env.RESEND_API_KEY)
+
+type InquiryProduct = {
+  id: string
+  name: string
+  brand?: string | null
+  category?: string | null
+  budget_band?: string | null
+  image_url?: string | null
+  quantity?: number
+}
+
+type InquiryCustomer = {
+  name?: string
+  company?: string
+  email?: string
+  phone?: string
+  requirement?: string
+}
+
+function escapeHtml(value: unknown) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;")
+}
+
+function createProductRows(products: InquiryProduct[]) {
+  return products
+    .map((product, index) => {
+      return `
+        <tr>
+          <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">
+            ${index + 1}
+          </td>
+          <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">
+            <strong>${escapeHtml(product.name)}</strong><br />
+            <span style="color: #6b7280;">
+              ${escapeHtml(product.brand || "white-c")} · ${escapeHtml(
+                product.category || "Corporate Gift"
+              )}
+            </span>
+          </td>
+          <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">
+            ${escapeHtml(product.budget_band || "-")}
+          </td>
+          <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">
+            ${escapeHtml(product.quantity || 1)}
+          </td>
+        </tr>
+      `
+    })
+    .join("")
+}
+
+function createPlainProductList(products: InquiryProduct[]) {
+  return products
+    .map((product, index) => {
+      return `${index + 1}. ${product.name}
+Brand: ${product.brand || "white-c"}
+Category: ${product.category || "Corporate Gift"}
+Budget Band: ${product.budget_band || "-"}
+Quantity: ${product.quantity || 1}`
+    })
+    .join("\n\n")
+}
+
+export async function POST(request: Request) {
+  try {
+    if (!process.env.RESEND_API_KEY) {
+      return Response.json(
+        {
+          success: false,
+          message: "RESEND_API_KEY is missing.",
+        },
+        { status: 500 }
+      )
+    }
+
+    if (!process.env.INQUIRY_RECEIVER_EMAIL) {
+      return Response.json(
+        {
+          success: false,
+          message: "INQUIRY_RECEIVER_EMAIL is missing.",
+        },
+        { status: 500 }
+      )
+    }
+
+    if (!process.env.RESEND_FROM_EMAIL) {
+      return Response.json(
+        {
+          success: false,
+          message: "RESEND_FROM_EMAIL is missing.",
+        },
+        { status: 500 }
+      )
+    }
+
+    const body = await request.json()
+
+    const customer = body.customer as InquiryCustomer
+    const products = body.products as InquiryProduct[]
+
+    if (!customer?.name || !customer?.email || !customer?.phone) {
+      return Response.json(
+        {
+          success: false,
+          message: "Name, email, and phone are required.",
+        },
+        { status: 400 }
+      )
+    }
+
+    if (!Array.isArray(products) || products.length === 0) {
+      return Response.json(
+        {
+          success: false,
+          message: "At least one product is required.",
+        },
+        { status: 400 }
+      )
+    }
+
+    const totalQuantity = products.reduce(
+      (total, product) => total + Number(product.quantity || 1),
+      0
+    )
+
+    const subject = `New white-c Inquiry from ${customer.name}`
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #111827; max-width: 760px;">
+        <h1 style="margin-bottom: 8px;">New white-c Inquiry</h1>
+        <p style="color: #6b7280; margin-top: 0;">
+          A customer submitted a new corporate gifting inquiry.
+        </p>
+
+        <h2 style="margin-top: 28px;">Customer Details</h2>
+
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;">Name</td>
+            <td style="padding: 8px 0;"><strong>${escapeHtml(
+              customer.name
+            )}</strong></td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;">Company</td>
+            <td style="padding: 8px 0;">${escapeHtml(
+              customer.company || "-"
+            )}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;">Email</td>
+            <td style="padding: 8px 0;">${escapeHtml(customer.email)}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;">Phone</td>
+            <td style="padding: 8px 0;">${escapeHtml(customer.phone)}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280;">Requirement</td>
+            <td style="padding: 8px 0;">${escapeHtml(
+              customer.requirement || "-"
+            ).replaceAll("\n", "<br />")}</td>
+          </tr>
+        </table>
+
+        <h2 style="margin-top: 28px;">Selected Products</h2>
+
+        <p style="color: #6b7280;">
+          ${products.length} product${products.length === 1 ? "" : "s"} selected ·
+          Total quantity ${totalQuantity}
+        </p>
+
+        <table style="width: 100%; border-collapse: collapse; border: 1px solid #e5e7eb;">
+          <thead>
+            <tr style="background: #f9fafb;">
+              <th align="left" style="padding: 12px;">#</th>
+              <th align="left" style="padding: 12px;">Product</th>
+              <th align="left" style="padding: 12px;">Budget Band</th>
+              <th align="left" style="padding: 12px;">Qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${createProductRows(products)}
+          </tbody>
+        </table>
+      </div>
+    `
+
+    const text = `
+New white-c Inquiry
+
+Customer Details:
+Name: ${customer.name}
+Company: ${customer.company || "-"}
+Email: ${customer.email}
+Phone: ${customer.phone}
+Requirement: ${customer.requirement || "-"}
+
+Selected Products:
+${createPlainProductList(products)}
+
+Total Quantity: ${totalQuantity}
+`
+
+    const { error } = await resend.emails.send({
+      from: process.env.RESEND_FROM_EMAIL,
+      to: process.env.INQUIRY_RECEIVER_EMAIL,
+      replyTo: customer.email,
+      subject,
+      html,
+      text,
+    })
+
+    if (error) {
+      return Response.json(
+        {
+          success: false,
+          message: error.message,
+        },
+        { status: 500 }
+      )
+    }
+
+    return Response.json({
+      success: true,
+    })
+  } catch (error: any) {
+    console.error("Inquiry send error:", error)
+
+    return Response.json(
+      {
+        success: false,
+        message:
+          error?.message || "Something went wrong while sending inquiry.",
+      },
+      { status: 500 }
+    )
+  }
+}
+==================== app/api/recommend/route.ts ====================
+import { generateText, Output } from "ai"
+import { z } from "zod"
+import { PRODUCTS, type Product } from "@/lib/data"
+
+export const maxDuration = 30
+
+interface MatchInput {
+  budget?: string
+  occasion?: string
+  recipientType?: string
+  quantity?: number
+  branding?: boolean
+  category?: string
+  notes?: string
+}
+
+interface Recommendation {
+  id: string
+  name: string
+  category: string
+  budgetBand: string
+  image: string
+  moq: number
+  leadTime: string
+  whyItFits: string
+  brandingOption: string
+  matchScore: number
+}
+
+// Deterministic scoring so the feature always works, even without an AI key.
+function scoreProduct(p: Product, input: MatchInput): number {
+  let score = 0
+  if (input.budget && p.budgetBand === input.budget) score += 40
+  if (input.category && p.category === input.category) score += 25
+  if (input.occasion && p.occasion.includes(input.occasion)) score += 20
+  if (input.recipientType && p.recipientType.includes(input.recipientType)) score += 15
+  if (input.branding && p.brandingAvailable) score += 10
+  if (typeof input.quantity === "number" && input.quantity >= p.moq) score += 10
+  // small base so results are never all-zero
+  score += 5
+  return score
+}
+
+const fallbackBranding = (p: Product) =>
+  p.brandingAvailable ? "Logo printing / engraving available" : "Standard packaging"
+
+function fallbackReason(p: Product, input: MatchInput): string {
+  const bits: string[] = []
+  if (input.budget && p.budgetBand === input.budget) bits.push(`fits your ${p.budgetBand} budget`)
+  if (input.occasion && p.occasion.includes(input.occasion))
+    bits.push(`well-suited for ${input.occasion.toLowerCase()}`)
+  if (input.recipientType && p.recipientType.includes(input.recipientType))
+    bits.push(`a strong choice for ${input.recipientType.toLowerCase()}`)
+  if (input.branding && p.brandingAvailable) bits.push("supports custom branding")
+  if (bits.length === 0) bits.push("a versatile, broadly-loved corporate gift")
+  return `This ${p.name.toLowerCase()} is ${bits.join(", ")}.`
+}
+
+export async function POST(req: Request) {
+  let input: MatchInput
+  try {
+    input = (await req.json()) as MatchInput
+  } catch {
+    return Response.json({ error: "Invalid request body" }, { status: 400 })
+  }
+
+  // Rank products deterministically
+  const ranked = [...PRODUCTS]
+    .map((p) => ({ product: p, score: scoreProduct(p, input) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+
+  const maxScore = ranked[0]?.score || 1
+
+  // Try to enrich with AI-written rationale. If it fails (no key, timeout),
+  // gracefully fall back to templated reasoning.
+  let aiReasons: Record<string, { whyItFits: string; brandingOption: string }> | null = null
+  try {
+    const { experimental_output } = await generateText({
+      model: "openai/gpt-5-mini",
+      experimental_output: Output.object({
+        schema: z.object({
+          recommendations: z.array(
+            z.object({
+              id: z.string(),
+              whyItFits: z.string(),
+              brandingOption: z.string(),
+            }),
+          ),
+        }),
+      }),
+      system:
+        "You are a corporate gifting advisor for WhiteC, a B2B gifting company in India. " +
+        "Given a buyer's requirement and a shortlist of candidate products, write a concise, " +
+        "persuasive 'why it fits' explanation (1-2 sentences) and a specific branding suggestion " +
+        "for each product. Be practical, professional, and reference budget/occasion/recipient when relevant. " +
+        "Use Indian Rupees context. Do not invent products outside the shortlist.",
+      prompt: JSON.stringify({
+        requirement: input,
+        shortlist: ranked.map(({ product }) => ({
+          id: product.id,
+          name: product.name,
+          category: product.category,
+          budgetBand: product.budgetBand,
+          moq: product.moq,
+          brandingAvailable: product.brandingAvailable,
+          occasion: product.occasion,
+          recipientType: product.recipientType,
+          description: product.description,
+        })),
+      }),
+    })
+
+    aiReasons = {}
+    for (const r of experimental_output.recommendations) {
+      aiReasons[r.id] = { whyItFits: r.whyItFits, brandingOption: r.brandingOption }
+    }
+  } catch (err) {
+    console.log("[v0] AI rationale unavailable, using fallback:", (err as Error).message)
+    aiReasons = null
+  }
+
+  const recommendations: Recommendation[] = ranked.map(({ product, score }) => {
+    const ai = aiReasons?.[product.id]
+    return {
+      id: product.id,
+      name: product.name,
+      category: product.category,
+      budgetBand: product.budgetBand,
+      image: product.image,
+      moq: product.moq,
+      leadTime: product.leadTime,
+      whyItFits: ai?.whyItFits ?? fallbackReason(product, input),
+      brandingOption: ai?.brandingOption ?? fallbackBranding(product),
+      matchScore: Math.round((score / maxScore) * 100),
+    }
+  })
+
+  return Response.json({ recommendations, aiPowered: aiReasons !== null })
+}
+
+==================== app/api/whatsapp/send-enquiry-update/route.ts ====================
+import { NextResponse } from "next/server"
+import { supabaseAdmin } from "@/lib/supabase-admin"
+import { requireAdminUser } from "@/lib/admin-auth"
+import {
+  cleanWhatsAppPhone,
+  sendWhatsAppTemplateMessage,
+  sendWhatsAppTextMessage,
+} from "@/lib/whatsapp-cloud"
+
+export const dynamic = "force-dynamic"
+
+function buildEnquiryUpdateText(enquiry: any) {
+  return `Hi ${enquiry.client_name}, this is White C.
+
+We have received your gifting enquiry for ${enquiry.product_names || "your requirement"}.
+
+Our team is reviewing it and will get back to you shortly.
+
+Reference: ${enquiry.enquiry_code}`
+}
+
+async function logOutboundMessage({
+  enquiryId,
+  toPhone,
+  messageText,
+  result,
+}: {
+  enquiryId: string
+  toPhone: string
+  messageText: string
+  result: any
+}) {
+  const { error } = await supabaseAdmin.from("whatsapp_outbound_messages").insert({
+    enquiry_id: enquiryId,
+    to_phone: toPhone,
+    message_type: "enquiry_update",
+    message_text: messageText,
+    whatsapp_message_id: result.whatsappMessageId || null,
+    send_status: result.success ? "Sent" : "Failed",
+    error_message: result.success ? null : result.error || "Failed",
+    raw_response: result.response || null,
+  })
+
+  if (error) {
+    console.error("WhatsApp enquiry outbound log failed:", error)
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    await requireAdminUser(["Sales", "Operations"])
+
+    const body = await request.json()
+    const enquiryId = String(body.enquiryId || "").trim()
+
+    if (!enquiryId) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Enquiry ID is required.",
+        },
+        { status: 400 }
+      )
+    }
+
+    const { data: enquiry, error } = await supabaseAdmin
+      .from("workflow_enquiries")
+      .select("*")
+      .eq("id", enquiryId)
+      .single()
+
+    if (error || !enquiry) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: error?.message || "Enquiry not found.",
+        },
+        { status: 404 }
+      )
+    }
+
+    const toPhone = cleanWhatsAppPhone(enquiry.client_phone)
+    const messageText = buildEnquiryUpdateText(enquiry)
+
+    if (!toPhone) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Client WhatsApp number is missing.",
+        },
+        { status: 400 }
+      )
+    }
+
+    const templateName = process.env.WHATSAPP_ENQUIRY_TEMPLATE_NAME
+
+    const result = templateName
+      ? await sendWhatsAppTemplateMessage({
+          to: toPhone,
+          templateName,
+          bodyVariables: [
+            enquiry.client_name || "Client",
+            enquiry.product_names || "your requirement",
+            enquiry.enquiry_code || "-",
+          ],
+        })
+      : await sendWhatsAppTextMessage({
+          to: toPhone,
+          message: messageText,
+        })
+
+    await logOutboundMessage({
+      enquiryId,
+      toPhone,
+      messageText,
+      result,
+    })
+
+    if (!result.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: result.error || "Failed to send WhatsApp update.",
+          to: toPhone,
+          result,
+        },
+        { status: 400 }
+      )
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: "WhatsApp update sent.",
+      to: toPhone,
+      whatsapp_message_id: result.whatsappMessageId || null,
+      result,
+    })
+  } catch (error: any) {
+    return NextResponse.json(
+      {
+        success: false,
+        message: error?.message || "Failed to send enquiry WhatsApp update.",
+      },
+      { status: 500 }
+    )
+  }
+}
+==================== app/api/whatsapp/send-proposal-quote/route.ts ====================
+import { NextResponse } from "next/server"
+import { requireAdminUser } from "@/lib/admin-auth"
+import { supabaseAdmin } from "@/lib/supabase-admin"
+
+function cleanPhone(phone: string) {
+  return String(phone || "").replace(/[^\d]/g, "")
+}
+
+function cleanTemplateText(value: string) {
+  return String(value || "")
+    .replace(/[\n\r\t]/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+}
+
+function getWhatsAppConfig() {
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN
+  const apiVersion = process.env.WHATSAPP_API_VERSION || "v21.0"
+  const templateName = process.env.WHATSAPP_PROPOSAL_TEMPLATE_NAME
+  const languageCode = process.env.WHATSAPP_TEMPLATE_LANGUAGE || "en_US"
+
+  if (!phoneNumberId) {
+    throw new Error("WHATSAPP_PHONE_NUMBER_ID is missing.")
+  }
+
+  if (!accessToken) {
+    throw new Error("WHATSAPP_ACCESS_TOKEN is missing.")
+  }
+
+  return {
+    phoneNumberId,
+    accessToken,
+    apiVersion,
+    templateName,
+    languageCode,
+  }
+}
+
+function buildProposalMessage({
+  clientName,
+  enquiryCode,
+  requirement,
+  estimatedValue,
+  validTill,
+  customMessage,
+}: {
+  clientName: string
+  enquiryCode: string
+  requirement: string
+  estimatedValue: string
+  validTill: string
+  customMessage: string
+}) {
+  return `Hi ${clientName}, this is White C.
+
+Proposal / Quotation Details:
+Reference: ${enquiryCode}
+Requirement: ${requirement}
+Estimated Value: ${estimatedValue || "As discussed"}
+Valid Till: ${validTill || "As discussed"}
+
+${customMessage}
+
+Our team will assist you with branding, quantity confirmation, and next steps.`
+}
+
+async function sendProposalWhatsApp({
+  enquiry,
+  requirement,
+  estimatedValue,
+  validTill,
+  customMessage,
+}: {
+  enquiry: any
+  requirement: string
+  estimatedValue: string
+  validTill: string
+  customMessage: string
+}) {
+  const {
+    phoneNumberId,
+    accessToken,
+    apiVersion,
+    templateName,
+    languageCode,
+  } = getWhatsAppConfig()
+
+  const toPhone = cleanPhone(enquiry.client_phone || "")
+
+  if (!toPhone) {
+    throw new Error("Client WhatsApp number is missing or invalid.")
+  }
+
+  const clientName = cleanTemplateText(enquiry.client_name || "there")
+  const enquiryCode = cleanTemplateText(enquiry.enquiry_code || "")
+  const finalRequirement = cleanTemplateText(
+    requirement || enquiry.product_names || "your gifting requirement"
+  )
+  const finalEstimatedValue = cleanTemplateText(estimatedValue || "As discussed")
+  const finalValidTill = cleanTemplateText(validTill || "As discussed")
+  const finalCustomMessage = cleanTemplateText(
+    customMessage || "Please review the proposal and share your confirmation."
+  )
+
+  const messageText = buildProposalMessage({
+    clientName,
+    enquiryCode,
+    requirement: finalRequirement,
+    estimatedValue: finalEstimatedValue,
+    validTill: finalValidTill,
+    customMessage: finalCustomMessage,
+  })
+
+  const url = `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`
+
+  const payload = templateName
+    ? {
+        messaging_product: "whatsapp",
+        to: toPhone,
+        type: "template",
+        template: {
+          name: templateName,
+          language: {
+            code: languageCode,
+          },
+          components: [
+            {
+              type: "body",
+              parameters: [
+                {
+                  type: "text",
+                  text: clientName,
+                },
+                {
+                  type: "text",
+                  text: enquiryCode,
+                },
+                {
+                  type: "text",
+                  text: finalRequirement,
+                },
+                {
+                  type: "text",
+                  text: finalEstimatedValue,
+                },
+                {
+                  type: "text",
+                  text: finalValidTill,
+                },
+                {
+                  type: "text",
+                  text: finalCustomMessage,
+                },
+              ],
+            },
+          ],
+        },
+      }
+    : {
+        messaging_product: "whatsapp",
+        to: toPhone,
+        type: "text",
+        text: {
+          preview_url: false,
+          body: messageText,
+        },
+      }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  })
+
+  const responseJson = await response.json()
+
+  await supabaseAdmin.from("whatsapp_outbound_messages").insert({
+    enquiry_id: enquiry.id,
+    to_phone: toPhone,
+    message_type: templateName
+      ? "proposal_quote_template"
+      : "proposal_quote_text",
+    message_text: messageText,
+    whatsapp_message_id: responseJson?.messages?.[0]?.id || null,
+    send_status: response.ok ? "Sent" : "Failed",
+    error_message: response.ok ? null : JSON.stringify(responseJson),
+    raw_response: responseJson,
+  })
+
+  if (!response.ok) {
+    throw new Error(
+      responseJson?.error?.message || "Failed to send proposal WhatsApp."
+    )
+  }
+
+  await supabaseAdmin
+    .from("workflow_enquiries")
+    .update({
+      proposal_status: "Sent",
+      last_client_interaction_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", enquiry.id)
+
+  return responseJson
+}
+
+export async function POST(request: Request) {
+  try {
+    await requireAdminUser(["Admin", "Owner", "Sales", "Operations"])
+
+    const body = await request.json()
+
+    const enquiryId = cleanTemplateText(body.enquiryId || "")
+    const requirement = cleanTemplateText(body.requirement || "")
+    const estimatedValue = cleanTemplateText(body.estimatedValue || "")
+    const validTill = cleanTemplateText(body.validTill || "")
+    const customMessage = cleanTemplateText(body.customMessage || "")
+
+    if (!enquiryId) {
+      throw new Error("Enquiry ID is required.")
+    }
+
+    const { data: enquiry, error } = await supabaseAdmin
+      .from("workflow_enquiries")
+      .select(
+        "id, enquiry_code, client_name, client_phone, client_email, product_names"
+      )
+      .eq("id", enquiryId)
+      .single()
+
+    if (error || !enquiry) {
+      throw new Error(error?.message || "Enquiry not found.")
+    }
+
+    if (!enquiry.client_phone) {
+      throw new Error("Client phone number is missing.")
+    }
+
+    const result = await sendProposalWhatsApp({
+      enquiry,
+      requirement,
+      estimatedValue,
+      validTill,
+      customMessage,
+    })
+
+    return NextResponse.json({
+      success: true,
+      result,
+    })
+  } catch (error: any) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: error?.message || "Failed to send proposal.",
+      },
+      {
+        status: 400,
+      }
+    )
+  }
+}
+==================== app/api/whatsapp/send-task-reminder/route.ts ====================
+import { NextResponse } from "next/server"
+import { requireAdminUser } from "@/lib/admin-auth"
+import { supabaseAdmin } from "@/lib/supabase-admin"
+
+function cleanPhone(phone: string) {
+  return String(phone || "").replace(/[^\d]/g, "")
+}
+
+function cleanTemplateText(value: string) {
+      return String(value || "")
+        .replace(/[\n\r\t]/g, " ")
+        .replace(/\s{2,}/g, " ")
+        .trim()
+}
+
+function getWhatsAppConfig() {
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID
+  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN
+  const apiVersion = process.env.WHATSAPP_API_VERSION || "v21.0"
+  const templateName = process.env.WHATSAPP_TASK_TEMPLATE_NAME
+  const languageCode = process.env.WHATSAPP_TEMPLATE_LANGUAGE || "en_US"
+
+  if (!phoneNumberId) {
+    throw new Error("WHATSAPP_PHONE_NUMBER_ID is missing.")
+  }
+
+  if (!accessToken) {
+    throw new Error("WHATSAPP_ACCESS_TOKEN is missing.")
+  }
+
+  return {
+    phoneNumberId,
+    accessToken,
+    apiVersion,
+    templateName,
+    languageCode,
+  }
+}
+
+function buildTaskText({
+  assigneeName,
+  taskCode,
+  taskTitle,
+  taskDescription,
+  dueDate,
+}: {
+  assigneeName: string
+  taskCode: string
+  taskTitle: string
+  taskDescription: string
+  dueDate: string
+}) {
+  return `Hi ${assigneeName}, this is a White C task reminder.
+
+Task Code: ${taskCode}
+Task: ${taskTitle}
+Description: ${taskDescription || "—"}
+Due Date: ${dueDate}
+
+Please reply with:
+DONE ${taskCode}
+or
+REMARK ${taskCode} your update.`
+}
+
+async function sendWhatsAppTaskReminder({
+  task,
+  assigneeName,
+  toPhone,
+}: {
+  task: any
+  assigneeName: string
+  toPhone: string
+}) {
+  const {
+    phoneNumberId,
+    accessToken,
+    apiVersion,
+    templateName,
+    languageCode,
+  } = getWhatsAppConfig()
+
+  const taskCode = cleanTemplateText(task.task_code || "")
+  const taskTitle = cleanTemplateText(task.title || "")
+  const taskDescription = cleanTemplateText(task.description || "")
+  const dueDate = cleanTemplateText(task.due_date || "Not set")
+
+  const messageText = buildTaskText({
+    assigneeName,
+    taskCode,
+    taskTitle,
+    taskDescription,
+    dueDate,
+  })
+
+  const url = `https://graph.facebook.com/${apiVersion}/${phoneNumberId}/messages`
+
+  const payload = templateName
+    ? {
+        messaging_product: "whatsapp",
+        to: toPhone,
+        type: "template",
+        template: {
+          name: templateName,
+          language: {
+            code: languageCode,
+          },
+          components: [
+            {
+              type: "body",
+              parameters: [
+                {
+                  type: "text",
+                  text: cleanTemplateText(assigneeName),
+                },
+                {
+                  type: "text",
+                  text: taskCode,
+                },
+                {
+                  type: "text",
+                  text: taskTitle || "—",
+                },
+                {
+                  type: "text",
+                  text: taskDescription || "—",
+                },
+                {
+                  type: "text",
+                  text: dueDate,
+                },
+              ],
+            },
+          ],
+        },
+      }
+    : {
+        messaging_product: "whatsapp",
+        to: toPhone,
+        type: "text",
+        text: {
+          preview_url: false,
+          body: messageText,
+        },
+      }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  })
+
+  const responseJson = await response.json()
+
+  await supabaseAdmin.from("whatsapp_outbound_messages").insert({
+    task_id: task.id,
+    to_phone: toPhone,
+    message_type: templateName ? "task_reminder_template" : "task_reminder_text",
+    message_text: messageText,
+    whatsapp_message_id: responseJson?.messages?.[0]?.id || null,
+    send_status: response.ok ? "Sent" : "Failed",
+    error_message: response.ok ? null : JSON.stringify(responseJson),
+    raw_response: responseJson,
+  })
+
+  if (!response.ok) {
+    throw new Error(
+      responseJson?.error?.message || "Failed to send WhatsApp task reminder."
+    )
+  }
+
+  return responseJson
+}
+
+export async function POST(request: Request) {
+  try {
+    await requireAdminUser([
+      "Admin",
+      "Owner",
+      "Operations",
+      "Sales",
+      "Accounts",
+    ])
+
+    const body = await request.json()
+    const taskId = String(body.taskId || "").trim()
+
+    if (!taskId) {
+      throw new Error("Task ID is required.")
+    }
+
+    const { data: task, error } = await supabaseAdmin
+      .from("workflow_tasks")
+      .select(
+        `
+        id,
+        task_code,
+        title,
+        description,
+        due_date,
+        status,
+        workflow_team_members (
+          name,
+          whatsapp
+        )
+      `
+      )
+      .eq("id", taskId)
+      .single()
+
+    if (error || !task) {
+      throw new Error(error?.message || "Task not found.")
+    }
+
+    if (task.status === "Done") {
+      throw new Error("Reminder cannot be sent for a completed task.")
+    }
+
+    const assignee = Array.isArray(task.workflow_team_members)
+      ? task.workflow_team_members[0]
+      : task.workflow_team_members
+
+    if (!assignee?.whatsapp) {
+      throw new Error("Assignee WhatsApp number is missing.")
+    }
+
+    const toPhone = cleanPhone(assignee.whatsapp)
+
+    if (!toPhone) {
+      throw new Error("Assignee WhatsApp number is invalid.")
+    }
+
+    const result = await sendWhatsAppTaskReminder({
+      task,
+      assigneeName: assignee.name || "there",
+      toPhone,
+    })
+
+    return NextResponse.json({
+      success: true,
+      result,
+    })
+  } catch (error: any) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: error?.message || "Failed to send task reminder.",
+      },
+      {
+        status: 400,
+      }
+    )
+  }
+}
+==================== app/api/whatsapp/webhook/route.ts ====================
+import { NextResponse } from "next/server"
+import crypto from "crypto"
+import { supabaseAdmin } from "@/lib/supabase-admin"
+
+function cleanText(value: string | number | null | undefined) {
+  return String(value || "")
+    .replace(/[\n\r\t]/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+}
+
+function normalizePhone(value: string | number | null | undefined) {
+  return String(value || "")
+    .replace(/\D/g, "")
+    .trim()
+}
+
+function getWhatsAppVerifyToken() {
+  return cleanText(process.env.WHATSAPP_VERIFY_TOKEN)
+}
+
+function getStatusTimestamp(timestamp: string | number | null | undefined) {
+  const value = Number(timestamp || 0)
+
+  if (!value) {
+    return new Date().toISOString()
+  }
+
+  return new Date(value * 1000).toISOString()
+}
+
+function mapSendStatus(status: string) {
+  if (status === "failed") {
+    return "Failed"
+  }
+
+  if (status === "delivered") {
+    return "Delivered"
+  }
+
+  if (status === "read") {
+    return "Read"
+  }
+
+  if (status === "sent") {
+    return "Sent"
+  }
+
+  return "Accepted"
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    value
+  )
+}
+
+function normalizeTaskSearchText(value: string | null | undefined) {
+  return cleanText(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+}
+
+async function findTaskByReference(
+  taskReference: string,
+  assigneeId?: string
+) {
+  const cleanReference = cleanText(taskReference)
+
+  if (!cleanReference) {
+    return null
+  }
+
+  const normalizedReference = normalizeTaskSearchText(cleanReference)
+
+  const { data: taskByCode } = await supabaseAdmin
+    .from("workflow_tasks")
+    .select("id, task_code, title, description, status, assignee_id, created_at")
+    .ilike("task_code", cleanReference)
+    .maybeSingle()
+
+  if (taskByCode) {
+    return taskByCode
+  }
+
+  if (isUuid(cleanReference)) {
+    const { data: taskById } = await supabaseAdmin
+      .from("workflow_tasks")
+      .select("id, task_code, title, description, status, assignee_id, created_at")
+      .eq("id", cleanReference)
+      .maybeSingle()
+
+    if (taskById) {
+      return taskById
+    }
+  }
+
+  const { data: recentTasks, error: recentTasksError } = await supabaseAdmin
+    .from("workflow_tasks")
+    .select("id, task_code, title, description, status, assignee_id, created_at")
+    .order("created_at", { ascending: false })
+    .limit(100)
+
+  if (recentTasksError) {
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "task_title_lookup_error",
+        raw_payload: {
+          taskReference: cleanReference,
+          error: recentTasksError.message,
+        },
+      })
+
+    return null
+  }
+
+  const sortedTasks = [...(recentTasks || [])].sort((a, b) => {
+    if (!assigneeId) {
+      return 0
+    }
+
+    const aAssigned = a.assignee_id === assigneeId ? 1 : 0
+    const bAssigned = b.assignee_id === assigneeId ? 1 : 0
+
+    return bAssigned - aAssigned
+  })
+
+  const matchedTask = sortedTasks.find((task) => {
+    const normalizedTitle = normalizeTaskSearchText(task.title)
+    const normalizedDescription = normalizeTaskSearchText(task.description)
+    const normalizedCombined = normalizeTaskSearchText(
+      `${task.title || ""} ${task.description || ""}`
+    )
+
+    return (
+      normalizedTitle === normalizedReference ||
+      normalizedTitle.includes(normalizedReference) ||
+      normalizedReference.includes(normalizedTitle) ||
+      normalizedDescription.includes(normalizedReference) ||
+      normalizedCombined.includes(normalizedReference)
+    )
+  })
+
+  if (matchedTask) {
+    return matchedTask
+  }
+
+  await supabaseAdmin
+    .from("whatsapp_webhook_events")
+    .insert({
+      event_type: "task_reference_no_match_debug",
+      raw_payload: {
+        taskReference: cleanReference,
+        normalizedReference,
+        assigneeId,
+        checkedTasks: sortedTasks.slice(0, 20).map((task) => ({
+          task_code: task.task_code,
+          title: task.title,
+          description: task.description,
+          assignee_id: task.assignee_id,
+        })),
+      },
+    })
+
+  return null
+}
+
+function getWhatsAppAppSecret() {
+  return cleanText(
+    process.env.WHATSAPP_APP_SECRET ||
+      process.env.META_APP_SECRET
+  )
+}
+
+function verifyMetaWebhookSignature(
+  rawBody: string,
+  signatureHeader: string | null
+) {
+  const appSecret = getWhatsAppAppSecret()
+
+  if (
+    !appSecret ||
+    !signatureHeader ||
+    !signatureHeader.startsWith("sha256=")
+  ) {
+    return false
+  }
+
+  const receivedHex = signatureHeader.slice("sha256=".length)
+
+  if (!/^[a-f0-9]{64}$/i.test(receivedHex)) {
+    return false
+  }
+
+  const expectedHex = crypto
+    .createHmac("sha256", appSecret)
+    .update(rawBody, "utf8")
+    .digest("hex")
+
+  const receivedBuffer = Buffer.from(receivedHex, "hex")
+  const expectedBuffer = Buffer.from(expectedHex, "hex")
+
+  return (
+    receivedBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(receivedBuffer, expectedBuffer)
+  )
+}
+
+export async function GET(request: Request) {
+  const url = new URL(request.url)
+
+  const isLocalTest = url.searchParams.get("local_test") === "1"
+
+  if (isLocalTest) {
+    if (process.env.NODE_ENV !== "development") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Local test is disabled outside development.",
+        },
+        {
+          status: 403,
+        }
+      )
+    }
+
+    const phone = normalizePhone(
+      url.searchParams.get("phone") || "919836232942"
+    )
+
+    const message = cleanText(
+      url.searchParams.get("message") || "done"
+    )
+
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "local_whatsapp_test_message",
+        raw_payload: {
+          phone,
+          message,
+        },
+      })
+
+    await handleTaskReply({
+      fromPhone: phone,
+      messageText: message,
+    })
+
+    return NextResponse.json({
+      success: true,
+      phone,
+      message,
+    })
+  }
+
+  const mode = url.searchParams.get("hub.mode")
+  const token = url.searchParams.get("hub.verify_token")
+  const challenge = url.searchParams.get("hub.challenge")
+
+  const verifyToken = getWhatsAppVerifyToken()
+
+  if (mode === "subscribe" && token === verifyToken && challenge) {
+    return new NextResponse(challenge, {
+      status: 200,
+    })
+  }
+
+  return NextResponse.json(
+    {
+      success: false,
+      error: "Webhook verification failed.",
+    },
+    {
+      status: 403,
+    }
+  )
+}
+
+async function updateOutboundMessageStatus(statusItem: any) {
+  const whatsappMessageId = cleanText(statusItem?.id)
+  const status = cleanText(statusItem?.status).toLowerCase()
+
+  if (!whatsappMessageId || !status) {
+    return
+  }
+
+  const statusTime = getStatusTimestamp(statusItem?.timestamp)
+
+  const updatePayload: any = {
+    delivery_status: status,
+    send_status: mapSendStatus(status),
+    webhook_status_payload: statusItem,
+  }
+
+  if (status === "delivered") {
+    updatePayload.delivered_at = statusTime
+  }
+
+  if (status === "read") {
+    updatePayload.read_at = statusTime
+  }
+
+  if (status === "failed") {
+    updatePayload.failed_at = statusTime
+
+    const errorDetails =
+      statusItem?.errors?.[0]?.message ||
+      statusItem?.errors?.[0]?.title ||
+      JSON.stringify(statusItem?.errors || statusItem)
+
+    updatePayload.error_message = errorDetails
+  }
+
+  await supabaseAdmin
+    .from("whatsapp_outbound_messages")
+    .update(updatePayload)
+    .eq("whatsapp_message_id", whatsappMessageId)
+}
+
+async function getRecentTaskFromLastMessage(toPhone: string) {
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+
+  const { data: recentMessages, error: recentMessageError } =
+    await supabaseAdmin
+      .from("whatsapp_outbound_messages")
+      .select("task_id, message_text, created_at, message_type, to_phone")
+      .eq("to_phone", toPhone)
+      .in("message_type", [
+        "task_reminder_template",
+        "task_reminder_text",
+      ])
+      .gte("created_at", fiveMinutesAgo)
+      .order("created_at", { ascending: false })
+      .limit(5)
+
+  if (recentMessageError) {
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "recent_task_lookup_error",
+        raw_payload: {
+          toPhone,
+          error: recentMessageError.message,
+        },
+      })
+
+    return null
+  }
+
+  const lastMessage = recentMessages?.[0]
+
+  if (!lastMessage) {
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "recent_task_not_found",
+        raw_payload: {
+          toPhone,
+          fiveMinutesAgo,
+        },
+      })
+
+    return null
+  }
+
+  if (lastMessage.task_id) {
+    const { data: taskById } = await supabaseAdmin
+      .from("workflow_tasks")
+      .select("id, task_code, title, description, status, assignee_id")
+      .eq("id", lastMessage.task_id)
+      .maybeSingle()
+
+    if (taskById) {
+      return taskById
+    }
+  }
+
+  const messageText = cleanText(lastMessage.message_text || "")
+  const codeMatch = messageText.match(/T-[A-Z0-9]+/i)
+
+  if (codeMatch?.[0]) {
+    const taskByCode = await findTaskByReference(codeMatch[0])
+
+    if (taskByCode) {
+      return taskByCode
+    }
+  }
+
+  await supabaseAdmin
+    .from("whatsapp_webhook_events")
+    .insert({
+      event_type: "recent_task_found_but_no_task_match",
+      raw_payload: {
+        toPhone,
+        lastMessage,
+      },
+    })
+
+  return null
+}
+
+function removeTaskWords(value: string) {
+  return cleanText(value)
+    .replace(/^task\s+id\s+/i, "")
+    .replace(/^task\s+code\s+/i, "")
+    .replace(/^taskid\s+/i, "")
+    .replace(/^taskcode\s+/i, "")
+    .replace(/^task\s+/i, "")
+    .trim()
+}
+
+function looksLikeTaskReference(value: string) {
+  const cleanValue = cleanText(value)
+
+  if (!cleanValue) {
+    return false
+  }
+
+  if (isUuid(cleanValue)) {
+    return true
+  }
+
+  return /^T-[A-Z0-9]+$/i.test(cleanValue)
+}
+
+async function handleTaskReply({
+  fromPhone,
+  messageText,
+}: {
+  fromPhone: string
+  messageText: string
+}) {
+  const cleanPhone = normalizePhone(fromPhone)
+  const cleanMessage = cleanText(messageText)
+
+  if (!cleanPhone || !cleanMessage) {
+    return
+  }
+
+  const { data: teamMembers } = await supabaseAdmin
+    .from("workflow_team_members")
+    .select("id, name, whatsapp, role, roles, is_active")
+    .eq("is_active", true)
+
+  const teamMember = (teamMembers || []).find((member) => {
+    return normalizePhone(member.whatsapp) === cleanPhone
+  })
+
+  if (!teamMember) {
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "task_reply_sender_not_found",
+        raw_payload: {
+          fromPhone: cleanPhone,
+          messageText: cleanMessage,
+        },
+      })
+
+    return
+  }
+
+  const lowerMessage = cleanMessage.toLowerCase()
+
+  const isDoneReply =
+    lowerMessage === "done" ||
+    lowerMessage.startsWith("done ")
+
+  const isRemarkReply =
+    lowerMessage === "remark" ||
+    lowerMessage.startsWith("remark ")
+
+  if (!isDoneReply && !isRemarkReply) {
+    return
+  }
+
+  const command = isDoneReply ? "DONE" : "REMARK"
+
+  let remainingText = cleanMessage
+    .replace(/^done/i, "")
+    .replace(/^remark/i, "")
+    .trim()
+
+  remainingText = removeTaskWords(remainingText)
+
+  let taskReference = ""
+  let remarkText = ""
+
+  if (remainingText) {
+    if (command === "DONE") {
+      taskReference = cleanText(remainingText)
+    }
+
+    if (command === "REMARK") {
+      const colonIndex = remainingText.indexOf(":")
+
+      if (colonIndex > 0) {
+        taskReference = cleanText(remainingText.slice(0, colonIndex))
+        remarkText = cleanText(remainingText.slice(colonIndex + 1))
+      } else {
+        const parts = remainingText.split(" ")
+        const possibleReference = cleanText(parts[0])
+
+        if (looksLikeTaskReference(possibleReference)) {
+          taskReference = possibleReference
+          remarkText = cleanText(parts.slice(1).join(" "))
+        } else {
+          remarkText = cleanText(remainingText)
+        }
+      }
+    }
+  }
+
+  let matchedTask = null
+
+  if (taskReference) {
+    matchedTask = await findTaskByReference(taskReference, teamMember.id)
+  }
+
+  if (!matchedTask) {
+    matchedTask = await getRecentTaskFromLastMessage(cleanPhone)
+  }
+
+  if (!matchedTask) {
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "task_reply_no_recent_or_reference_match",
+        raw_payload: {
+          fromPhone: cleanPhone,
+          teamMemberId: teamMember.id,
+          teamMemberName: teamMember.name,
+          messageText: cleanMessage,
+          extractedReference: taskReference,
+          command,
+        },
+      })
+
+    return
+  }
+
+  if (command === "DONE") {
+    await supabaseAdmin
+      .from("workflow_tasks")
+      .update({
+        status: "Done",
+        remark: `Marked done by WhatsApp reply from ${teamMember.name}`,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", matchedTask.id)
+
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "task_marked_done_by_whatsapp",
+        raw_payload: {
+          fromPhone: cleanPhone,
+          teamMemberId: teamMember.id,
+          teamMemberName: teamMember.name,
+          taskId: matchedTask.id,
+          taskCode: matchedTask.task_code,
+          messageText: cleanMessage,
+          matchedUsing: taskReference ? "task_reference" : "recent_message",
+        },
+      })
+
+    return
+  }
+
+  const finalRemark =
+    remarkText ||
+    `Remark received by WhatsApp reply from ${teamMember.name}`
+
+  await supabaseAdmin
+    .from("workflow_tasks")
+    .update({
+      remark: finalRemark,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", matchedTask.id)
+
+  await supabaseAdmin
+    .from("whatsapp_webhook_events")
+    .insert({
+      event_type: "task_remark_added_by_whatsapp",
+      raw_payload: {
+        fromPhone: cleanPhone,
+        teamMemberId: teamMember.id,
+        teamMemberName: teamMember.name,
+        taskId: matchedTask.id,
+        taskCode: matchedTask.task_code,
+        messageText: cleanMessage,
+        remark: finalRemark,
+        matchedUsing: taskReference ? "task_reference" : "recent_message",
+      },
+    })
+}
+
+export async function POST(request: Request) {
+  try {
+    const rawBody = await request.text()
+    const signatureHeader = request.headers.get("x-hub-signature-256")
+
+    if (!verifyMetaWebhookSignature(rawBody, signatureHeader)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid webhook signature.",
+        },
+        {
+          status: 401,
+          headers: {
+            "Cache-Control": "no-store, max-age=0",
+          },
+        }
+      )
+    }
+
+    let body: any
+
+    try {
+      body = JSON.parse(rawBody)
+    } catch {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid webhook payload.",
+        },
+        {
+          status: 400,
+          headers: {
+            "Cache-Control": "no-store, max-age=0",
+          },
+        }
+      )
+    }
+
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "whatsapp_webhook_post_v2_started",
+        raw_payload: body,
+      })
+
+    const entries = Array.isArray(body?.entry) ? body.entry : []
+
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "whatsapp_webhook_entries_count",
+        raw_payload: {
+          entriesCount: entries.length,
+        },
+      })
+
+    for (const entry of entries) {
+      const changes = Array.isArray(entry?.changes) ? entry.changes : []
+
+      await supabaseAdmin
+        .from("whatsapp_webhook_events")
+        .insert({
+          event_type: "whatsapp_webhook_changes_count",
+          raw_payload: {
+            changesCount: changes.length,
+          },
+        })
+
+      for (const change of changes) {
+        const value = change?.value || {}
+
+        const statuses = Array.isArray(value?.statuses)
+          ? value.statuses
+          : []
+
+        const messages = Array.isArray(value?.messages)
+          ? value.messages
+          : []
+
+        await supabaseAdmin
+          .from("whatsapp_webhook_events")
+          .insert({
+            event_type: "whatsapp_webhook_value_detected",
+            raw_payload: {
+              statusesCount: statuses.length,
+              messagesCount: messages.length,
+            },
+          })
+
+        for (const statusItem of statuses) {
+          await updateOutboundMessageStatus(statusItem)
+        }
+
+        for (const message of messages) {
+          const fromPhone = normalizePhone(message?.from)
+
+          const messageText = cleanText(
+            message?.text?.body ||
+              message?.button?.text ||
+              message?.interactive?.button_reply?.title ||
+              message?.interactive?.button_reply?.id ||
+              message?.interactive?.list_reply?.title ||
+              message?.interactive?.list_reply?.id ||
+              ""
+          )
+
+          await supabaseAdmin
+            .from("whatsapp_webhook_events")
+            .insert({
+              event_type: "incoming_whatsapp_message",
+              raw_payload: {
+                fromPhone,
+                messageText,
+                message,
+              },
+            })
+
+          await handleTaskReply({
+            fromPhone,
+            messageText,
+          })
+        }
+      }
+    }
+
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "whatsapp_webhook_post_v2_completed",
+        raw_payload: {
+          success: true,
+        },
+      })
+
+    return NextResponse.json({
+      success: true,
+    })
+  } catch (error: any) {
+    await supabaseAdmin
+      .from("whatsapp_webhook_events")
+      .insert({
+        event_type: "whatsapp_webhook_error",
+        raw_payload: {
+          error: error?.message || "Webhook processing failed.",
+        },
+      })
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: error?.message || "Webhook processing failed.",
+      },
+      {
+        status: 200,
+      }
+    )
+  }
+}

@@ -1,8 +1,19 @@
 import { Resend } from "resend"
+import {
+  consumeRateLimit,
+  createRateLimitHeaders,
+} from "@/lib/rate-limit"
 
 export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
 
 const resend = new Resend(process.env.RESEND_API_KEY)
+
+const MAX_REQUEST_BYTES = 64_000
+const MAX_PRODUCTS = 20
+const INQUIRY_IP_LIMIT = 20
+const INQUIRY_EMAIL_LIMIT = 5
+const INQUIRY_WINDOW_SECONDS = 60 * 60
 
 type InquiryProduct = {
   id: string
@@ -15,11 +26,38 @@ type InquiryProduct = {
 }
 
 type InquiryCustomer = {
-  name?: string
-  company?: string
-  email?: string
-  phone?: string
-  requirement?: string
+  name: string
+  company: string
+  email: string
+  phone: string
+  requirement: string
+}
+
+function jsonResponse(
+  body: Record<string, unknown>,
+  status = 200,
+  extraHeaders: Record<string, string> = {}
+) {
+  return Response.json(body, {
+    status,
+    headers: {
+      "Cache-Control": "no-store, max-age=0",
+      ...extraHeaders,
+    },
+  })
+}
+
+function cleanText(value: unknown, maxLength: number) {
+  return String(value ?? "").trim().slice(0, maxLength)
+}
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+}
+
+function isValidPhone(value: string) {
+  const digits = value.replace(/\D/g, "")
+  return digits.length >= 7 && digits.length <= 15
 }
 
 function escapeHtml(value: unknown) {
@@ -31,10 +69,76 @@ function escapeHtml(value: unknown) {
     .replaceAll("'", "&#039;")
 }
 
+function normalizeCustomer(value: unknown): InquiryCustomer | null {
+  if (!value || typeof value !== "object") return null
+
+  const customer = value as Record<string, unknown>
+
+  const normalized = {
+    name: cleanText(customer.name, 120),
+    company: cleanText(customer.company, 160),
+    email: cleanText(customer.email, 254).toLowerCase(),
+    phone: cleanText(customer.phone, 40),
+    requirement: cleanText(customer.requirement, 3_000),
+  }
+
+  if (
+    !normalized.name ||
+    !normalized.email ||
+    !normalized.phone ||
+    !isValidEmail(normalized.email) ||
+    !isValidPhone(normalized.phone)
+  ) {
+    return null
+  }
+
+  return normalized
+}
+
+function normalizeProducts(value: unknown): InquiryProduct[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_PRODUCTS) {
+    return null
+  }
+
+  const products: InquiryProduct[] = []
+
+  for (const rawProduct of value) {
+    if (!rawProduct || typeof rawProduct !== "object") {
+      return null
+    }
+
+    const product = rawProduct as Record<string, unknown>
+    const id = cleanText(product.id, 120)
+    const name = cleanText(product.name, 250)
+
+    const rawQuantity = Number(product.quantity ?? 1)
+    const quantity =
+      Number.isSafeInteger(rawQuantity) && rawQuantity >= 1 && rawQuantity <= 10_000
+        ? rawQuantity
+        : NaN
+
+    if (!id || !name || !Number.isFinite(quantity)) {
+      return null
+    }
+
+    products.push({
+      id,
+      name,
+      brand: cleanText(product.brand, 150) || null,
+      category: cleanText(product.category, 150) || null,
+      budget_band: cleanText(product.budget_band, 80) || null,
+      image_url: cleanText(product.image_url, 2_000) || null,
+      quantity,
+    })
+  }
+
+  return products
+}
+
 function createProductRows(products: InquiryProduct[]) {
   return products
-    .map((product, index) => {
-      return `
+    .map(
+      (product, index) => `
         <tr>
           <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">
             ${index + 1}
@@ -55,76 +159,143 @@ function createProductRows(products: InquiryProduct[]) {
           </td>
         </tr>
       `
-    })
+    )
     .join("")
 }
 
 function createPlainProductList(products: InquiryProduct[]) {
   return products
-    .map((product, index) => {
-      return `${index + 1}. ${product.name}
+    .map(
+      (product, index) => `${index + 1}. ${product.name}
 Brand: ${product.brand || "white-c"}
 Category: ${product.category || "Corporate Gift"}
 Budget Band: ${product.budget_band || "-"}
 Quantity: ${product.quantity || 1}`
-    })
+    )
     .join("\n\n")
 }
 
 export async function POST(request: Request) {
   try {
-    if (!process.env.RESEND_API_KEY) {
-      return Response.json(
+    const contentLength = Number(request.headers.get("content-length") || 0)
+
+    if (contentLength > MAX_REQUEST_BYTES) {
+      return jsonResponse(
         {
           success: false,
-          message: "RESEND_API_KEY is missing.",
+          message: "Inquiry request is too large.",
         },
-        { status: 500 }
+        413
       )
     }
 
-    if (!process.env.INQUIRY_RECEIVER_EMAIL) {
-      return Response.json(
+    const ipRateLimit = await consumeRateLimit({
+      request,
+      scope: "public-inquiry-ip",
+      limit: INQUIRY_IP_LIMIT,
+      windowSeconds: INQUIRY_WINDOW_SECONDS,
+    })
+
+    const ipRateHeaders = createRateLimitHeaders(ipRateLimit)
+
+    if (!ipRateLimit.allowed) {
+      return jsonResponse(
         {
           success: false,
-          message: "INQUIRY_RECEIVER_EMAIL is missing.",
+          message: "Too many inquiry attempts. Please try again later.",
         },
-        { status: 500 }
+        429,
+        ipRateHeaders
       )
     }
 
-    if (!process.env.RESEND_FROM_EMAIL) {
-      return Response.json(
+    let body: unknown
+
+    try {
+      body = await request.json()
+    } catch {
+      return jsonResponse(
         {
           success: false,
-          message: "RESEND_FROM_EMAIL is missing.",
+          message: "Invalid inquiry request.",
         },
-        { status: 500 }
+        400,
+        ipRateHeaders
       )
     }
 
-    const body = await request.json()
-
-    const customer = body.customer as InquiryCustomer
-    const products = body.products as InquiryProduct[]
-
-    if (!customer?.name || !customer?.email || !customer?.phone) {
-      return Response.json(
+    if (!body || typeof body !== "object") {
+      return jsonResponse(
         {
           success: false,
-          message: "Name, email, and phone are required.",
+          message: "Invalid inquiry request.",
         },
-        { status: 400 }
+        400,
+        ipRateHeaders
       )
     }
 
-    if (!Array.isArray(products) || products.length === 0) {
-      return Response.json(
+    const requestBody = body as Record<string, unknown>
+    const customer = normalizeCustomer(requestBody.customer)
+    const products = normalizeProducts(requestBody.products)
+
+    if (!customer) {
+      return jsonResponse(
         {
           success: false,
-          message: "At least one product is required.",
+          message: "Please provide a valid name, email, and phone number.",
         },
-        { status: 400 }
+        400,
+        ipRateHeaders
+      )
+    }
+
+    if (!products) {
+      return jsonResponse(
+        {
+          success: false,
+          message: `Select between 1 and ${MAX_PRODUCTS} valid products.`,
+        },
+        400,
+        ipRateHeaders
+      )
+    }
+
+    const emailRateLimit = await consumeRateLimit({
+      request,
+      scope: "public-inquiry-email",
+      identifier: customer.email,
+      limit: INQUIRY_EMAIL_LIMIT,
+      windowSeconds: INQUIRY_WINDOW_SECONDS,
+    })
+
+    const emailRateHeaders = createRateLimitHeaders(emailRateLimit)
+
+    if (!emailRateLimit.allowed) {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Too many inquiry attempts. Please try again later.",
+        },
+        429,
+        emailRateHeaders
+      )
+    }
+
+    if (
+      !process.env.RESEND_API_KEY ||
+      !process.env.INQUIRY_RECEIVER_EMAIL ||
+      !process.env.RESEND_FROM_EMAIL
+    ) {
+      console.error("Inquiry email configuration is incomplete.")
+
+      return jsonResponse(
+        {
+          success: false,
+          message: "Inquiry service is temporarily unavailable.",
+        },
+        503,
+        emailRateHeaders
       )
     }
 
@@ -222,28 +393,34 @@ Total Quantity: ${totalQuantity}
     })
 
     if (error) {
-      return Response.json(
+      console.error("Inquiry email send failed:", error)
+
+      return jsonResponse(
         {
           success: false,
-          message: error.message,
+          message: "Unable to send your inquiry right now.",
         },
-        { status: 500 }
+        502,
+        emailRateHeaders
       )
     }
 
-    return Response.json({
-      success: true,
-    })
-  } catch (error: any) {
+    return jsonResponse(
+      {
+        success: true,
+      },
+      200,
+      emailRateHeaders
+    )
+  } catch (error) {
     console.error("Inquiry send error:", error)
 
-    return Response.json(
+    return jsonResponse(
       {
         success: false,
-        message:
-          error?.message || "Something went wrong while sending inquiry.",
+        message: "Something went wrong while sending your inquiry.",
       },
-      { status: 500 }
+      500
     )
   }
 }

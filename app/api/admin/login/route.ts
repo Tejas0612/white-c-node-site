@@ -3,9 +3,18 @@ import crypto from "crypto"
 import bcrypt from "bcryptjs"
 import { supabaseAdmin } from "@/lib/supabase-admin"
 import { ADMIN_SESSION_COOKIE } from "@/lib/admin-auth"
+import {
+  consumeRateLimit,
+  createRateLimitHeaders,
+} from "@/lib/rate-limit"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
+
+const MAX_LOGIN_REQUEST_BYTES = 4_096
+const LOGIN_IP_LIMIT = 30
+const LOGIN_ACCOUNT_LIMIT = 5
+const LOGIN_WINDOW_SECONDS = 15 * 60
 
 const noStoreHeaders = {
   "Cache-Control": "no-store, max-age=0",
@@ -13,26 +22,77 @@ const noStoreHeaders = {
 
 function jsonResponse(
   body: Record<string, unknown>,
-  status: number
+  status: number,
+  extraHeaders: Record<string, string> = {}
 ) {
   return Response.json(body, {
     status,
-    headers: noStoreHeaders,
+    headers: {
+      ...noStoreHeaders,
+      ...extraHeaders,
+    },
   })
 }
 
-function invalidCredentialsResponse() {
+function invalidCredentialsResponse(
+  extraHeaders: Record<string, string> = {}
+) {
   return jsonResponse(
     {
       success: false,
       message: "Invalid email or password.",
     },
-    401
+    401,
+    extraHeaders
+  )
+}
+
+function rateLimitedResponse(
+  retryAfterSeconds: number,
+  extraHeaders: Record<string, string>
+) {
+  return jsonResponse(
+    {
+      success: false,
+      message: `Too many login attempts. Please try again in ${Math.ceil(
+        retryAfterSeconds / 60
+      )} minute(s).`,
+    },
+    429,
+    extraHeaders
   )
 }
 
 export async function POST(request: Request) {
   try {
+    const contentLength = Number(request.headers.get("content-length") || 0)
+
+    if (contentLength > MAX_LOGIN_REQUEST_BYTES) {
+      return jsonResponse(
+        {
+          success: false,
+          message: "Invalid login request.",
+        },
+        413
+      )
+    }
+
+    const ipRateLimit = await consumeRateLimit({
+      request,
+      scope: "admin-login-ip",
+      limit: LOGIN_IP_LIMIT,
+      windowSeconds: LOGIN_WINDOW_SECONDS,
+    })
+
+    const ipRateLimitHeaders = createRateLimitHeaders(ipRateLimit)
+
+    if (!ipRateLimit.allowed) {
+      return rateLimitedResponse(
+        ipRateLimit.retryAfterSeconds,
+        ipRateLimitHeaders
+      )
+    }
+
     let requestBody: unknown
 
     try {
@@ -43,7 +103,8 @@ export async function POST(request: Request) {
           success: false,
           message: "Invalid login request.",
         },
-        400
+        400,
+        ipRateLimitHeaders
       )
     }
 
@@ -53,7 +114,8 @@ export async function POST(request: Request) {
           success: false,
           message: "Invalid login request.",
         },
-        400
+        400,
+        ipRateLimitHeaders
       )
     }
 
@@ -72,12 +134,30 @@ export async function POST(request: Request) {
           success: false,
           message: "Email and password are required.",
         },
-        400
+        400,
+        ipRateLimitHeaders
       )
     }
 
     if (email.length > 254 || password.length > 200) {
-      return invalidCredentialsResponse()
+      return invalidCredentialsResponse(ipRateLimitHeaders)
+    }
+
+    const accountRateLimit = await consumeRateLimit({
+      request,
+      scope: "admin-login-account",
+      identifier: email,
+      limit: LOGIN_ACCOUNT_LIMIT,
+      windowSeconds: LOGIN_WINDOW_SECONDS,
+    })
+
+    const accountRateLimitHeaders = createRateLimitHeaders(accountRateLimit)
+
+    if (!accountRateLimit.allowed) {
+      return rateLimitedResponse(
+        accountRateLimit.retryAfterSeconds,
+        accountRateLimitHeaders
+      )
     }
 
     const { data: user, error } = await supabaseAdmin
@@ -88,13 +168,13 @@ export async function POST(request: Request) {
       .single()
 
     if (error || !user?.password_hash) {
-      return invalidCredentialsResponse()
+      return invalidCredentialsResponse(accountRateLimitHeaders)
     }
 
     const passwordMatches = await bcrypt.compare(password, user.password_hash)
 
     if (!passwordMatches) {
-      return invalidCredentialsResponse()
+      return invalidCredentialsResponse(accountRateLimitHeaders)
     }
 
     const sessionToken = crypto.randomBytes(32).toString("hex")
@@ -117,7 +197,8 @@ export async function POST(request: Request) {
           success: false,
           message: "Unable to sign in right now. Please try again.",
         },
-        500
+        500,
+        accountRateLimitHeaders
       )
     }
 
@@ -142,7 +223,8 @@ export async function POST(request: Request) {
           roles: user.roles,
         },
       },
-      200
+      200,
+      accountRateLimitHeaders
     )
   } catch (error) {
     console.error("Admin login error:", error)

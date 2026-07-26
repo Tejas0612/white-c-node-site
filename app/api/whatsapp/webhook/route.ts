@@ -468,7 +468,8 @@ async function handleTaskReply({
 
   const isDoneReply =
     lowerMessage === "done" ||
-    lowerMessage.startsWith("done ")
+    lowerMessage.startsWith("done ") ||
+    lowerMessage === "mark as done"
 
   const isRemarkReply =
     lowerMessage === "remark" ||
