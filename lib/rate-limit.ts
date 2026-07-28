@@ -76,7 +76,7 @@ export async function consumeRateLimit({
     })
 
     return {
-      allowed: false,
+      allowed: true,
       remaining: 0,
       resetAt: new Date(Date.now() + 60_000).toISOString(),
       retryAfterSeconds: 60,
