@@ -67,6 +67,18 @@ async function isValidAdminSession(sessionToken: string) {
 }
 
 export async function proxy(request: NextRequest) {
+  // 1. FORCE HTTPS & www CANONICAL DOMAIN FIRST
+  const host = request.headers.get("host") || ""
+  const proto = request.headers.get("x-forwarded-proto")
+
+  if (proto === "http" || host === "white-c.in") {
+    const url = request.nextUrl.clone()
+    url.protocol = "https:"
+    url.host = "www.white-c.in"
+    return NextResponse.redirect(url, 308)
+  }
+
+  // 2. EXISTING ROUTE CHECKS
   const pathname = request.nextUrl.pathname
 
   if (isPublicAdminPath(pathname)) {
@@ -113,6 +125,18 @@ export async function proxy(request: NextRequest) {
   return NextResponse.next()
 }
 
+// export const config = {
+//   matcher: ["/admin/:path*", "/api/admin/:path*"],
+// }
+
 export const config = {
-  matcher: ["/admin/:path*", "/api/admin/:path*"],
+  matcher: [
+    /*
+     * Match all request paths except for the ones starting with:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico, icon.png (favicon files)
+     */
+    "/((?!_next/static|_next/image|favicon.ico|icon.png).*)",
+  ],
 }
