@@ -1,6 +1,6 @@
 "use server"
 
-import { revalidatePath } from "next/cache"
+import { revalidatePath, revalidateTag } from "next/cache"
 import { requireAdminUser } from "@/lib/admin-auth"
 import { supabaseAdmin } from "@/lib/supabase-admin"
 
@@ -264,6 +264,7 @@ export async function createStockItem(formData: FormData) {
   }
 
   revalidatePath("/admin/workflow/stock-report")
+  revalidateTag("public-catalog", { expire: 0 })
   revalidatePath("/admin/products")
 }
 
@@ -319,6 +320,7 @@ export async function updateStockItem(formData: FormData) {
   }
 
   revalidatePath("/admin/workflow/stock-report")
+  revalidateTag("public-catalog", { expire: 0 })
   revalidatePath("/admin/products")
 }
 
@@ -412,6 +414,7 @@ export async function importStockCsv(formData: FormData) {
   }
 
   revalidatePath("/admin/workflow/stock-report")
+  revalidateTag("public-catalog", { expire: 0 })
   revalidatePath("/admin/products")
 
   return {

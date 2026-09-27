@@ -189,7 +189,7 @@ async function convertPdfPageToImage(
   console.error("PDF conversion failed:", lastError)
 
   throw new Error(
-    "PDF conversion failed. Install Poppler using Homebrew, then restart server."
+    "PDF conversion failed. The server requires Poppler (pdftocairo); check the hosting image and server logs."
   )
 }
 
@@ -261,7 +261,7 @@ async function createWideCatalogImage(
         width: 1200,
         withoutEnlargement: true,
       })
-      .jpeg({ quality: 92 })
+      .jpeg({ quality: 78 })
       .toBuffer()
   }
 
@@ -288,7 +288,7 @@ async function createWideCatalogImage(
       width: 1200,
       withoutEnlargement: true,
     })
-    .jpeg({ quality: 92 })
+    .jpeg({ quality: 78 })
     .toBuffer()
 }
 
@@ -315,7 +315,7 @@ async function uploadGeneratedImageToSupabase(
     .upload(storagePath, imageBuffer, {
       contentType: "image/jpeg",
       upsert: true,
-      cacheControl: "0",
+      cacheControl: "31536000",
     })
 
   if (error) {

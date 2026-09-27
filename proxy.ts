@@ -67,14 +67,16 @@ async function isValidAdminSession(sessionToken: string) {
 }
 
 export async function proxy(request: NextRequest) {
-  // 1. FORCE HTTPS & www CANONICAL DOMAIN FIRST
-  const host = request.headers.get("host") || ""
-  const proto = request.headers.get("x-forwarded-proto")
-
-  if (proto === "http" || host === "white-c.in") {
+  // Canonicalize only WHITEC's live domains. Preview hosts and local health
+  // checks must remain on their own host rather than redirecting to Vercel.
+  const host = (request.headers.get("host") || "").split(":")[0].toLowerCase()
+  const proto = request.headers.get("x-forwarded-proto")?.split(",")[0].trim()
+  const liveDomain = host === "white-c.in" || host === "www.white-c.in"
+  if (request.nextUrl.pathname !== "/api/health" && liveDomain && (host === "white-c.in" || proto === "http")) {
     const url = request.nextUrl.clone()
     url.protocol = "https:"
-    url.host = "www.white-c.in"
+    url.hostname = "www.white-c.in"
+    url.port = ""
     return NextResponse.redirect(url, 308)
   }
 

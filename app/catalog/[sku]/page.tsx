@@ -4,7 +4,7 @@ import { notFound } from "next/navigation"
 import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
 import { AddToInquiryButton } from "@/components/inquiry/add-to-inquiry-button"
-import { supabase } from "@/lib/supabase"
+import { catalogClient as supabase, PUBLIC_PRODUCT_FIELDS } from "@/lib/public-catalog"
 
 type ProductPageProps = {
   params: Promise<{
@@ -68,7 +68,7 @@ export default async function ProductDetailPage({ params }: ProductPageProps) {
 
   const { data: product, error: productError } = await supabase
     .from("products")
-    .select("*")
+    .select(PUBLIC_PRODUCT_FIELDS)
     .eq("sku", sku)
     .eq("is_active", true)
     .single<Product>()
@@ -79,14 +79,14 @@ export default async function ProductDetailPage({ params }: ProductPageProps) {
 
   const { data: images } = await supabase
     .from("product_images")
-    .select("*")
+    .select("id,product_sku,image_url,image_filename,image_type,sort_order")
     .eq("product_sku", product.sku)
     .order("sort_order", { ascending: true })
     .returns<ProductImage[]>()
 
   const { data: features } = await supabase
     .from("product_features")
-    .select("*")
+    .select("id,product_sku,feature_text,sort_order")
     .eq("product_sku", product.sku)
     .order("sort_order", { ascending: true })
     .returns<ProductFeature[]>()

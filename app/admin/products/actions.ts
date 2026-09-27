@@ -1,6 +1,6 @@
 "use server"
 
-import { revalidatePath } from "next/cache"
+import { revalidatePath, revalidateTag } from "next/cache"
 import { requireAdminUser } from "@/lib/admin-auth"
 import { supabaseAdmin } from "@/lib/supabase-admin"
 
@@ -65,6 +65,7 @@ function validateProduct(
 
 function revalidateProductPages(sku?: string | null) {
   revalidatePath("/admin/products")
+  revalidateTag("public-catalog", { expire: 0 })
   revalidatePath("/catalog")
 
   if (sku) {

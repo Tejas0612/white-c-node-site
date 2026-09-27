@@ -21,6 +21,7 @@ type NavItem = {
 }
 
 const navItems: NavItem[] = [
+  { pageKey: "control_center", label: "Service & cost centre", href: "/admin/control-center", fallbackRoles: ["Owner"] },
   {
     pageKey: "dashboard",
     label: "Dashboard",
@@ -107,6 +108,8 @@ function canSeeNavItem({
   accessRows?: RoleAccessRow[]
 }) {
   const userRoles = getUserRoles(user)
+
+  if (item.pageKey === "control_center") return userRoles.has("Owner")
 
   if (userRoles.has("Admin") || userRoles.has("Owner")) {
     return true

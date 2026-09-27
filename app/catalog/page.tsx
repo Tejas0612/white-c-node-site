@@ -2,7 +2,7 @@ import { Navbar } from "@/components/navbar"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
-import { supabase } from "@/lib/supabase"
+import { catalogClient as supabase, PUBLIC_PRODUCT_FIELDS } from "@/lib/public-catalog"
 import { AddToInquiryButton } from "@/components/inquiry/add-to-inquiry-button"
 
 export const dynamic = "force-dynamic"
@@ -12,6 +12,7 @@ type CatalogPageProps = {
     budget?: string | string[]
     category?: string | string[]
     use_case?: string | string[]
+    page?: string
   }>
 }
 
@@ -311,6 +312,7 @@ function FilterChip({
 }) {
   return (
     <Link
+      prefetch={false}
       href={href}
       className={
         active
@@ -332,7 +334,7 @@ export default async function CatalogPage({ searchParams }: CatalogPageProps) {
 
   const { data, error } = await supabase
     .from("products")
-    .select("*")
+    .select(PUBLIC_PRODUCT_FIELDS)
     .eq("is_active", true)
     .order("created_at", { ascending: false })
     .returns<Product[]>()
@@ -345,6 +347,15 @@ export default async function CatalogPage({ searchParams }: CatalogPageProps) {
     selectedCategories,
     selectedUseCases,
   })
+
+  const requestedPage = Number(resolvedSearchParams?.page || 1)
+  const pageCount = Math.max(1, Math.ceil(products.length / 24))
+  const page = Math.min(pageCount, Math.max(1, Number.isSafeInteger(requestedPage) ? requestedPage : 1))
+  const visibleProducts = products.slice((page - 1) * 24, page * 24)
+  const pageHref = (nextPage: number) => {
+    const base = createFilterHref({budgets: selectedBudgets, categories: selectedCategories, useCases: selectedUseCases})
+    return `${base}${base.includes("?") ? "&" : "?"}page=${nextPage}`
+  }
 
   const hasActiveFilters =
     selectedBudgets.length > 0 ||
@@ -382,6 +393,7 @@ export default async function CatalogPage({ searchParams }: CatalogPageProps) {
 
                   {hasActiveFilters && (
                     <Link
+                      prefetch={false}
                       href="/catalog"
                       className="text-sm font-semibold text-muted-foreground hover:text-foreground"
                     >
@@ -451,7 +463,7 @@ export default async function CatalogPage({ searchParams }: CatalogPageProps) {
 
             {error && (
               <div className="mt-8 rounded-2xl border border-red-200 bg-red-50 p-5 text-red-700">
-                {error.message}
+                The catalogue is temporarily unavailable. Please try again shortly or contact our gifting team.
               </div>
             )}
 
@@ -459,11 +471,11 @@ export default async function CatalogPage({ searchParams }: CatalogPageProps) {
               <p className="text-sm text-muted-foreground">
                 Showing{" "}
                 <span className="font-semibold text-foreground">
-                  {products.length}
+                  {visibleProducts.length}
                 </span>{" "}
                 of{" "}
                 <span className="font-semibold text-foreground">
-                  {allProducts.length}
+                  {products.length}
                 </span>{" "}
                 products
               </p>
@@ -486,7 +498,7 @@ export default async function CatalogPage({ searchParams }: CatalogPageProps) {
 
             <div className="mt-8 grid items-stretch gap-6 md:grid-cols-2 lg:grid-cols-3">
               {products.length > 0 ? (
-                products.map((product) => {
+                visibleProducts.map((product) => {
                   const productHref = `/catalog/${product.sku}`
 
                   return (
@@ -494,10 +506,14 @@ export default async function CatalogPage({ searchParams }: CatalogPageProps) {
                       key={product.id}
                       className="flex h-full min-h-[640px] flex-col rounded-3xl border bg-card p-5 shadow-sm transition hover:-translate-y-1 hover:shadow-md"
                     >
-                      <Link href={productHref} className="block">
+                      <Link prefetch={false} href={productHref} className="block">
                         <div className="flex h-56 items-center justify-center overflow-hidden rounded-2xl bg-white">
                           {product.image_url ? (
                             <img
+                              loading="lazy"
+                              decoding="async"
+                              width={480}
+                              height={320}
                               src={product.image_url}
                               alt={product.name}
                               className="h-full w-full object-contain p-3"
@@ -515,7 +531,7 @@ export default async function CatalogPage({ searchParams }: CatalogPageProps) {
                           {product.category || "Corporate Gift"}
                         </p>
 
-                        <Link href={productHref} className="mt-3 block">
+                        <Link prefetch={false} href={productHref} className="mt-3 block">
                           <h2 className="line-clamp-2 min-h-[64px] text-2xl font-semibold leading-tight transition hover:text-muted-foreground">
                             {product.name}
                           </h2>
@@ -557,7 +573,7 @@ export default async function CatalogPage({ searchParams }: CatalogPageProps) {
                         </p>
 
                         <div className="mt-auto grid grid-cols-1 gap-3 pt-6 sm:grid-cols-3">
-                          <Link href={productHref} className="w-full">
+                          <Link prefetch={false} href={productHref} className="w-full">
                             <Button
                               variant="outline"
                               className="h-11 w-full rounded-xl px-3 text-sm font-semibold"
@@ -578,7 +594,7 @@ export default async function CatalogPage({ searchParams }: CatalogPageProps) {
                             }}
                           />
 
-                          <Link href="/inquiry" className="w-full">
+                          <Link prefetch={false} href="/inquiry" className="w-full">
                             <Button
                               variant="outline"
                               className="h-11 w-full rounded-xl px-3 text-sm font-semibold"
@@ -599,12 +615,17 @@ export default async function CatalogPage({ searchParams }: CatalogPageProps) {
                     No products match the selected filters.
                   </p>
 
-                  <Link href="/catalog">
+                  <Link prefetch={false} href="/catalog">
                     <Button className="mt-6">Clear Filters</Button>
                   </Link>
                 </div>
               )}
             </div>
+            {pageCount > 1 && <nav aria-label="Catalogue pages" className="mt-10 flex items-center justify-center gap-6">
+              {page > 1 && <Link prefetch={false} href={pageHref(page - 1)} className="rounded-xl border px-5 py-3">Previous</Link>}
+              <span>Page {page} of {pageCount}</span>
+              {page < pageCount && <Link prefetch={false} href={pageHref(page + 1)} className="rounded-xl border px-5 py-3">Next</Link>}
+            </nav>}
           </div>
         </section>
       </main>

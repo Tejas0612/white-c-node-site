@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict'
+import http from 'node:http'
+const base=process.env.TEST_BASE_URL || 'http://127.0.0.1:3003'
+const get=async(path,init={})=>fetch(new URL(path,base),{redirect:'manual',signal:AbortSignal.timeout(20000),...init})
+const response=await get('/catalog');assert.equal(response.status,200)
+const html=(await response.text()).replace(/<!--.*?-->/g,'');assert.ok(!html.includes('catalogue is temporarily unavailable'),'Catalogue query failed')
+assert.ok(html.includes('Page 1 of'),'Expected paginated catalogue')
+assert.equal((html.match(/<article/g)||[]).length,24,'First page should render 24 cards')
+assert.equal((html.match(/loading="lazy"/g)||[]).length,24,'Catalogue images must be lazy')
+console.log('PASS catalogue has 24 cards and lazy images')
+for(const path of ['/catalog?page=2','/catalog?page=-1','/catalog?page=not-a-number','/catalog?category=Drinkware'])assert.equal((await get(path)).status,200)
+console.log('PASS pagination and filters')
+const privatePage=await get('/admin/control-center');assert.equal(privatePage.status,307);assert.ok(privatePage.headers.get('location')?.includes('/admin/login'))
+console.log('PASS owner dashboard requires login')
+const invalid=await get('/api/recommend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({notes:123})});assert.equal(invalid.status,400)
+const match=await get('/api/recommend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({budget:'Under ₹250'})});assert.equal(match.status,200);assert.ok((await match.json()).recommendations.length>0)
+console.log('PASS input validation and free recommendations')
+const canonical=await new Promise((resolve,reject)=>{const request=http.get(new URL('/catalog?category=Drinkware',base),{headers:{Host:'white-c.in','x-forwarded-proto':'http'}},response=>{response.resume();resolve(response)});request.on('error',reject);request.setTimeout(10000,()=>request.destroy(new Error('timeout')))})
+assert.equal(canonical.statusCode,308);assert.equal(canonical.headers.location,'https://www.white-c.in/catalog?category=Drinkware')
+console.log('PASS canonical domain redirect preserves query without local port')

@@ -1,0 +1,47 @@
+services:
+  - type: web
+    name: whitec
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeployTrigger: off
+    envVars:
+      - key: GIFTMATCH_AI_ENABLED
+        value: "false"
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_TELEMETRY_DISABLED
+        value: "1"
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: INQUIRY_RECEIVER_EMAIL
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: WHATSAPP_TASK_TEMPLATE_NAME
+        sync: false
+      - key: WHATSAPP_ENQUIRY_TEMPLATE_NAME
+        sync: false
+      - key: WHATSAPP_PROPOSAL_TEMPLATE_NAME
+        sync: false
+      - key: WHATSAPP_TEMPLATE_LANGUAGE
+        value: en_US

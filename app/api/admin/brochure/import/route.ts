@@ -1,3 +1,4 @@
+import { revalidateTag } from "next/cache"
 import { requireAdminUser } from "@/lib/admin-auth"
 import { supabaseAdmin } from "@/lib/supabase-admin"
 
@@ -245,6 +246,7 @@ export async function POST(request: Request) {
       }
     }
 
+    revalidateTag("public-catalog", { expire: 0 })
     return jsonResponse({
       success: true,
       count: rows.length,
